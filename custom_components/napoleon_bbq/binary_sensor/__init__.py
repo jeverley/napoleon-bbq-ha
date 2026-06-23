@@ -5,46 +5,29 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from custom_components.napoleon_bbq.const import PARALLEL_UPDATES as PARALLEL_UPDATES
-from homeassistant.components.binary_sensor import BinarySensorEntityDescription
 
-from .connectivity import ENTITY_DESCRIPTIONS as CONNECTIVITY_DESCRIPTIONS, NapoleonBBQConnectivitySensor
-from .filter import ENTITY_DESCRIPTIONS as FILTER_DESCRIPTIONS, NapoleonBBQFilterSensor
+from .connected import ENTITY_DESCRIPTIONS as CONNECTED_DESCRIPTIONS, NapoleonBBQConnectedBinarySensor
 
 if TYPE_CHECKING:
     from custom_components.napoleon_bbq.data import NapoleonBBQConfigEntry
     from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
-# Combine all entity descriptions from different modules
-ENTITY_DESCRIPTIONS: tuple[BinarySensorEntityDescription, ...] = (
-    *CONNECTIVITY_DESCRIPTIONS,
-    *FILTER_DESCRIPTIONS,
-)
+    from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: NapoleonBBQConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the binary_sensor platform."""
-    # Create connectivity sensors
-    connectivity_entities = [
-        NapoleonBBQConnectivitySensor(
-            coordinator=entry.runtime_data.coordinator,
-            entity_description=entity_description,
+    for subentry_id, coordinator in entry.runtime_data.items():
+        async_add_entities(
+            (
+                NapoleonBBQConnectedBinarySensor(
+                    coordinator=coordinator,
+                    entity_description=entity_description,
+                )
+                for entity_description in CONNECTED_DESCRIPTIONS
+            ),
+            config_subentry_id=subentry_id,
         )
-        for entity_description in CONNECTIVITY_DESCRIPTIONS
-    ]
-
-    # Create filter sensors
-    filter_entities = [
-        NapoleonBBQFilterSensor(
-            coordinator=entry.runtime_data.coordinator,
-            entity_description=entity_description,
-        )
-        for entity_description in FILTER_DESCRIPTIONS
-    ]
-
-    # Add all entities
-    async_add_entities([*connectivity_entities, *filter_entities])

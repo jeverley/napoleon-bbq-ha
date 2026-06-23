@@ -15,39 +15,28 @@ from homeassistant.const import EntityCategory
 if TYPE_CHECKING:
     from custom_components.napoleon_bbq.coordinator import NapoleonBBQDataUpdateCoordinator
 
-ENTITY_DESCRIPTIONS = (
+ENTITY_DESCRIPTIONS: tuple[BinarySensorEntityDescription, ...] = (
     BinarySensorEntityDescription(
-        key="api_connectivity",
-        translation_key="api_connectivity",
+        key="connected",
+        translation_key="connected",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
-        icon="mdi:api",
-        has_entity_name=True,
     ),
 )
 
 
-class NapoleonBBQConnectivitySensor(BinarySensorEntity, NapoleonBBQEntity):
-    """Connectivity sensor for napoleon_bbq."""
+class NapoleonBBQConnectedBinarySensor(BinarySensorEntity, NapoleonBBQEntity):
+    """Binary sensor indicating whether the grill is BLE-connected and authenticated."""
 
     def __init__(
         self,
         coordinator: NapoleonBBQDataUpdateCoordinator,
         entity_description: BinarySensorEntityDescription,
     ) -> None:
-        """Initialize the sensor."""
+        """Initialise the connectivity sensor."""
         super().__init__(coordinator, entity_description)
 
     @property
     def is_on(self) -> bool:
-        """Return true if the API connection is established."""
-        # Connection is considered established if coordinator has valid data
-        return self.coordinator.last_update_success
-
-    @property
-    def extra_state_attributes(self) -> dict[str, str | None]:
-        """Return additional state attributes."""
-        return {
-            "update_interval": str(self.coordinator.update_interval),
-            "api_endpoint": "JSONPlaceholder (Demo)",
-        }
+        """Return True when the BLE session is connected and authenticated."""
+        return self.coordinator.authenticated

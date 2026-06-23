@@ -5,29 +5,29 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from custom_components.napoleon_bbq.const import PARALLEL_UPDATES as PARALLEL_UPDATES
-from homeassistant.components.number import NumberEntityDescription
 
-from .target_humidity import ENTITY_DESCRIPTIONS as HUMIDITY_DESCRIPTIONS, NapoleonBBQHumidityNumber
+from .target_temp import ENTITY_DESCRIPTIONS, NapoleonBBQTargetTempNumber
 
 if TYPE_CHECKING:
     from custom_components.napoleon_bbq.data import NapoleonBBQConfigEntry
     from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
-# Combine all entity descriptions from different modules
-ENTITY_DESCRIPTIONS: tuple[NumberEntityDescription, ...] = (*HUMIDITY_DESCRIPTIONS,)
+    from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: NapoleonBBQConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the number platform."""
-    async_add_entities(
-        NapoleonBBQHumidityNumber(
-            coordinator=entry.runtime_data.coordinator,
-            entity_description=entity_description,
+    for subentry_id, coordinator in entry.runtime_data.items():
+        async_add_entities(
+            (
+                NapoleonBBQTargetTempNumber(
+                    coordinator=coordinator,
+                    entity_description=entity_description,
+                )
+                for entity_description in ENTITY_DESCRIPTIONS
+            ),
+            config_subentry_id=subentry_id,
         )
-        for entity_description in HUMIDITY_DESCRIPTIONS
-    )

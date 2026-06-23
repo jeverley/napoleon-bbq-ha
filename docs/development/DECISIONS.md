@@ -110,6 +110,84 @@ Each decision is documented with:
 
 ---
 
+### Ayla BLE Local Control (not cloud polling)
+
+**Date:** 2026-06-22
+
+**Context:** Napoleon grills use the Ayla IoT platform. Two runtime communication paths exist:
+Ayla cloud REST API (polling) or Ayla Local Control v2 directly over BLE (JSON/GATT, HMAC-SHA256).
+
+**Decision:** Communicate directly over BLE at runtime. The Ayla cloud API is used only at
+setup time to authenticate and fetch the per-device BLE `local_key`.
+
+**Rationale:**
+
+- Local-only after setup; no cloud dependency at runtime
+- Faster state updates; works offline
+- `bleak-retry-connector` handles BLE reconnection robustly
+- Avoids polling the cloud for data the device will push over BLE
+
+**Consequences:**
+
+- `api/` package is setup-time only; not imported at runtime
+- `bluetooth/` package added for Ayla Local Control v2 protocol framing and HMAC-SHA256 auth
+- `coordinator/` holds a persistent BLE connection via `NapoleonBBQBLEMixin`
+- `iot_class: local_polling` (polling required for temperatures; see Push + Poll Hybrid decision)
+
+---
+
+### Hub/Sub-entry Architecture (multi-grill support)
+
+**Date:** 2026-06-22
+
+**Context:** Users may own multiple Napoleon grills under one Ayla account. The template's
+"Future Considerations" noted "Multi-Device Support" as not yet implemented.
+
+**Decision:** One config entry per Napoleon account (the hub), one `ConfigSubentry` per grill.
+`entry.runtime_data` is `dict[str, NapoleonBBQDataUpdateCoordinator]` keyed by `subentry_id`.
+
+**Rationale:**
+
+- Correct HA pattern for a hub-with-devices model
+- Reauth refreshes `local_key` for all grills in a single sign-in round-trip
+- `async_get_supported_subentry_types` allows adding grills post-setup without a full re-setup
+- Sub-entry unique ID (lowercase MAC) prevents duplicate grill registration across entries
+
+**Consequences:**
+
+- Resolves "Multi-Device Support" future consideration (see below)
+- Entities must pass `config_subentry_id=subentry_id` to `AddConfigEntryEntitiesCallback`
+- `entry.runtime_data` is a dict, not a single coordinator — blueprint entity patterns need
+  adaptation (iterate `runtime_data.items()` in platform `async_setup_entry`)
+
+---
+
+### Push + Poll Hybrid (BLE + WiFi coexistence)
+
+**Date:** 2026-06-22
+
+**Context:** The template's "Future Considerations" noted "Polling vs Push" as unresolved. The
+grill supports both `Odp` push notifications over BLE and `Gpr` poll requests.
+
+**Decision:** Use both: `Odp` push for state-change events; `Gpr` polling every 30 s for
+temperature values.
+
+**Rationale:**
+
+- When a grill has active WiFi/MQTT, it suppresses `PRB_TMP_*` temperature pushes over BLE
+  (temperatures go via MQTT to Ayla cloud instead). Polling is therefore required for reliable
+  temperature readings in normal home use.
+- State-change events (probe connected, settings changes) still arrive via `Odp` BLE push and
+  do not need polling.
+
+**Consequences:**
+
+- Resolves "Polling vs Push" future consideration (see below)
+- `iot_class: local_polling` rather than `local_push`
+- 30 s poll interval is the effective temperature refresh rate
+
+---
+
 ## Future Considerations
 
 ### State Restoration
@@ -120,15 +198,11 @@ Consider implementing state restoration for switches and configurable settings t
 
 ### Multi-Device Support
 
-**Status:** Not yet implemented
-
-Current architecture assumes single device per config entry. If multi-device support is needed, coordinator data structure will need redesign to map device ID → data.
+**Status:** Resolved — see [Hub/Sub-entry Architecture](#hubsub-entry-architecture-multi-grill-support) decision (2026-06-22)
 
 ### Polling vs. Push
 
-**Status:** Uses polling
-
-Currently implements polling-based updates. If the API supports webhooks or WebSocket, consider implementing push-based updates for real-time responsiveness.
+**Status:** Resolved — see [Push + Poll Hybrid](#push--poll-hybrid-ble--wifi-coexistence) decision (2026-06-22)
 
 ---
 

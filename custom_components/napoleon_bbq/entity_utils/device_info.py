@@ -1,91 +1,46 @@
-"""Device info utilities for napoleon_bbq."""
+"""
+Device info utility for napoleon_bbq.
+
+Provides a single helper for building the ``DeviceInfo`` object used by all
+entities in the integration. Centralising this ensures that the device
+registry entry stays consistent across all platforms.
+
+For more information on device info:
+https://developers.home-assistant.io/docs/device_registry_index
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from custom_components.napoleon_bbq.const import CONF_DSN, CONF_MAC, DOMAIN, MANUFACTURER
 from homeassistant.helpers.device_registry import DeviceInfo
 
 if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry
+    from custom_components.napoleon_bbq.coordinator import NapoleonBBQDataUpdateCoordinator
 
 
-def create_device_info(
-    config_entry: ConfigEntry,
-    name: str | None = None,
-    manufacturer: str | None = None,
-    model: str | None = None,
-    sw_version: str | None = None,
-) -> DeviceInfo:
+def build_device_info(coordinator: NapoleonBBQDataUpdateCoordinator) -> DeviceInfo:
     """
-    Create a DeviceInfo object for an entity.
+    Build the device registry entry for a Napoleon Prestige grill.
+
+    Uses the grill MAC address as the stable device identifier so that
+    the device registry entry persists across integration reinstalls.
 
     Args:
-        config_entry: The config entry for the integration
-        name: Optional device name
-        manufacturer: Optional manufacturer name
-        model: Optional model name
-        sw_version: Optional software version
+        coordinator: The BLE coordinator for this sub-entry. Provides access
+            to the sub-entry data (MAC address, DSN) and title (grill name).
 
     Returns:
-        A DeviceInfo object with the specified information
+        A ``DeviceInfo`` instance suitable for setting on
+        ``_attr_device_info`` in any entity class.
 
-    Example:
-        >>> device_info = create_device_info(
-        ...     config_entry,
-        ...     name="My Device",
-        ...     manufacturer="Example Corp",
-        ...     model="Model X",
-        ... )
     """
+    subentry = coordinator.subentry
     return DeviceInfo(
-        identifiers={(config_entry.domain, config_entry.entry_id)},
-        name=name or "Napoleon BBQ",
-        manufacturer=manufacturer or "Napoleon BBQ",
-        model=model or "Unknown",
-        sw_version=sw_version,
+        identifiers={(DOMAIN, subentry.data[CONF_MAC])},
+        name=subentry.title,
+        manufacturer=MANUFACTURER,
+        model="Prestige",
+        serial_number=subentry.data.get(CONF_DSN),
     )
-
-
-def update_device_info(
-    base_info: DeviceInfo,
-    **kwargs: Any,
-) -> DeviceInfo:
-    """
-    Update a DeviceInfo object with new information.
-
-    Args:
-        base_info: The base DeviceInfo to update
-        **kwargs: Key-value pairs to update in the DeviceInfo
-
-    Returns:
-        An updated DeviceInfo object
-
-    Example:
-        >>> updated_info = update_device_info(
-        ...     base_info,
-        ...     model="New Model",
-        ...     sw_version="2.0.0",
-        ... )
-    """
-    # Create a new DeviceInfo with updated values
-    updated = dict(base_info)
-    updated.update(kwargs)
-    return DeviceInfo(**updated)  # type: ignore[arg-type]
-
-
-def get_device_identifiers(config_entry: ConfigEntry) -> set[tuple[str, str]]:
-    """
-    Get device identifiers for a config entry.
-
-    Args:
-        config_entry: The config entry
-
-    Returns:
-        A set of device identifier tuples
-
-    Example:
-        >>> identifiers = get_device_identifiers(config_entry)
-        >>> # Returns: {('napoleon_bbq', 'entry_id_value')}
-    """
-    return {(config_entry.domain, config_entry.entry_id)}

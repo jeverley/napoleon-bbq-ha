@@ -1,8 +1,14 @@
 """
 Options flow for napoleon_bbq.
 
-This module implements the options flow that allows users to modify settings
-after the initial configuration, such as update intervals and debug settings.
+This module implements the options flow that allows users to modify integration
+settings after initial configuration.
+
+Currently configurable options:
+    poll_interval: How often (in seconds) the coordinator polls all grill
+        properties via ``Gpr`` when the grill has active WiFi/MQTT. Only
+        temperature values need polling; state changes arrive via unsolicited
+        ``Odp`` pushes regardless of this setting. Default: 30 s.
 
 For more information:
 https://developers.home-assistant.io/docs/config_entries_options_flow_handler
@@ -18,16 +24,16 @@ from homeassistant import config_entries
 
 class NapoleonBBQOptionsFlow(config_entries.OptionsFlow):
     """
-    Handle options flow for the integration.
+    Handle the options flow for napoleon_bbq.
 
-    This class manages the options that users can modify after initial setup,
-    such as update intervals and debug settings.
-
-    The options flow always starts with async_step_init and provides a single
-    form for all configurable options.
+    Provides a single form for all configurable integration settings. Changes
+    take effect immediately via entry reload (handled automatically by HA when
+    the entry uses the ``OptionsFlowWithReload`` mixin — registered as a reload
+    listener in ``async_setup_entry``).
 
     For more information:
     https://developers.home-assistant.io/docs/config_entries_options_flow_handler
+
     """
 
     async def async_step_init(
@@ -37,14 +43,13 @@ class NapoleonBBQOptionsFlow(config_entries.OptionsFlow):
         """
         Manage the options for the integration.
 
-        This is the entry point for the options flow, allowing users to
-        configure advanced settings like update interval and debugging.
+        Pre-fills the form with current option values and saves on submission.
 
         Args:
-            user_input: The user input from the options form, or None for initial display.
+            user_input: The submitted option values, or None to show the form.
 
         Returns:
-            The config flow result, either showing a form or creating an options entry.
+            A form result for initial display, or an options entry result on save.
 
         """
         if user_input is not None:

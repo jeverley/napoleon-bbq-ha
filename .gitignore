@@ -20,6 +20,9 @@ node_modules/
 # AI agent temporary scratch files and planning notes
 .ai-scratch/
 
+# Handover / research artefacts — may contain real credentials, never commit
+_handover/
+
 # Runtime artifact created by the template-sync workflow (never commit)
 .templatesyncignore.runtime
 

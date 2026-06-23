@@ -1,9 +1,10 @@
 """
-Core DataUpdateCoordinator implementation for napoleon_bbq.
+Core BLE coordinator for napoleon_bbq.
 
-This module contains the main coordinator class that manages data fetching
-and updates for all entities in the integration. It handles refresh cycles,
-error handling, and triggers reauthentication when needed.
+This module manages the persistent Bluetooth LE connection to the Napoleon Prestige
+grill. BLE connection lifecycle logic lives in ``listeners.py`` (mixed in via
+``NapoleonBBQBLEMixin``). This module handles coordinator setup, data polling,
+and clean shutdown.
 
 For more information on coordinators:
 https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-single-api-poll-for-data-for-all-entities
@@ -11,112 +12,135 @@ https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from custom_components.napoleon_bbq.api import NapoleonBBQApiClientAuthenticationError, NapoleonBBQApiClientError
-from custom_components.napoleon_bbq.const import LOGGER
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from custom_components.napoleon_bbq.config_flow_handler.schemas import CONF_POLL_INTERVAL
+from custom_components.napoleon_bbq.const import CONF_LOCAL_KEY, CONF_MAC, DOMAIN, LOGGER, POLL_INTERVAL_S
+from custom_components.napoleon_bbq.coordinator.listeners import NapoleonBBQBLEMixin
+from custom_components.napoleon_bbq.data import NapoleonBBQGrillState
+from homeassistant.components.bluetooth import async_ble_device_from_address
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 if TYPE_CHECKING:
     from custom_components.napoleon_bbq.data import NapoleonBBQConfigEntry
+    from homeassistant.config_entries import ConfigSubentry
 
 
-class NapoleonBBQDataUpdateCoordinator(DataUpdateCoordinator):
+class NapoleonBBQDataUpdateCoordinator(DataUpdateCoordinator[NapoleonBBQGrillState], NapoleonBBQBLEMixin):
     """
-    Class to manage fetching data from the API.
+    BLE coordinator for the Napoleon Prestige grill.
 
-    This coordinator handles all data fetching for the integration and distributes
-    updates to all entities. It manages:
-    - Periodic data updates based on update_interval
-    - Error handling and recovery
-    - Authentication failure detection and reauthentication triggers
-    - Data distribution to all entities
-    - Context-based data fetching (only fetch data for active entities)
+    Inherits BLE connection lifecycle from ``NapoleonBBQBLEMixin`` (listeners.py)
+    and HA coordinator machinery from ``DataUpdateCoordinator``.
 
-    For more information:
-    https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-single-api-poll-for-data-for-all-entities
+    Responsibilities of this class:
+        - Coordinator setup and initial state (``_async_setup``).
+        - Periodic property polling when authenticated (``_async_update_data``).
+        - Clean shutdown of BLE state and coordinator resources (``async_shutdown``).
+
+    For more information on the BLE protocol:
+    See _handover/CLAUDE.md — Protocol section.
 
     Attributes:
-        config_entry: The config entry for this integration instance.
+        config_entry: The hub config entry for this integration instance.
+        subentry: The sub-entry containing this grill's MAC, DSN, and local key.
+
     """
 
     config_entry: NapoleonBBQConfigEntry
 
+    def __init__(
+        self,
+        hass: Any,
+        config_entry: NapoleonBBQConfigEntry,
+        subentry: ConfigSubentry,
+    ) -> None:
+        """
+        Initialise the coordinator.
+
+        Args:
+            hass: The Home Assistant instance.
+            config_entry: The hub config entry (provides poll interval from options
+                and the background task helper).
+            subentry: The device sub-entry containing ``CONF_MAC`` and
+                ``CONF_LOCAL_KEY`` in its data.
+
+        """
+        poll_interval = config_entry.options.get(CONF_POLL_INTERVAL, POLL_INTERVAL_S)
+        super().__init__(
+            hass,
+            LOGGER,
+            name=f"{DOMAIN}_{subentry.data[CONF_MAC]}",
+            update_interval=timedelta(seconds=poll_interval),
+        )
+        self.config_entry = config_entry
+        self._subentry = subentry
+        self._init_ble(subentry.data[CONF_MAC], subentry.data[CONF_LOCAL_KEY])
+
+    @property
+    def subentry(self) -> ConfigSubentry:
+        """Return the device sub-entry associated with this coordinator."""
+        return self._subentry
+
     async def _async_setup(self) -> None:
         """
-        Set up the coordinator.
+        Set up the coordinator before the first data refresh.
 
-        This method is called automatically during async_config_entry_first_refresh()
-        and is the ideal place for one-time initialization tasks such as:
-        - Loading device information
-        - Setting up event listeners
-        - Initializing caches
+        Initialises an empty grill state, then either connects immediately if the
+        grill is already advertising or registers an advertisement callback to
+        connect when the grill powers on.
 
-        This runs before the first data fetch, ensuring any required setup
-        is complete before entities start requesting data.
+        This method is called automatically by Home Assistant during
+        ``async_config_entry_first_refresh``.
         """
-        # Example: Fetch device info once at startup
-        # device_info = await self.config_entry.runtime_data.client.get_device_info()
-        # self._device_id = device_info["id"]
-        LOGGER.debug("Coordinator setup complete for %s", self.config_entry.entry_id)
+        self.data = NapoleonBBQGrillState()
+        device = async_ble_device_from_address(self.hass, self._mac, connectable=True)
+        if device is not None:
+            self.config_entry.async_create_background_task(
+                self.hass,
+                self._connect_and_run(device),
+                f"napoleon_bbq_connect_{self._mac}",
+            )
+        else:
+            self._register_bt_callback()
+        LOGGER.debug("Coordinator setup complete for Napoleon BBQ %s", self._mac)
 
-    async def _async_update_data(self) -> Any:
+    async def _async_update_data(self) -> NapoleonBBQGrillState:
         """
-        Fetch data from API endpoint.
+        Poll all Ayla properties via ``Gpr`` if the session is authenticated.
 
-        This is the only method that should be implemented in a DataUpdateCoordinator.
-        It is called automatically based on the update_interval.
-
-        Context-based fetching:
-        The coordinator tracks which entities are currently listening via async_contexts().
-        This allows optimizing API calls to only fetch data that's actually needed.
-        For example, if only sensor entities are enabled, we can skip fetching switch data.
-
-        The API client uses the credentials from config_entry to authenticate:
-        - username: from config_entry.data["username"]
-        - password: from config_entry.data["password"]
-
-        Expected API response structure (example):
-        {
-            "userId": 1,      # Used as device identifier
-            "id": 1,          # Data record ID
-            "title": "...",   # Additional metadata
-            "body": "...",    # Additional content
-            # In production, would include:
-            # "air_quality": {"aqi": 45, "pm25": 12.3},
-            # "filter": {"life_remaining": 75, "runtime_hours": 324},
-            # "settings": {"fan_speed": "medium", "humidity": 55}
-        }
+        When the grill is offline or authentication has not yet completed, the
+        method returns the existing state without raising an error. Temperatures
+        and state-change events are also propagated immediately via
+        ``async_set_updated_data`` from the notification callback, so entities
+        update as soon as the grill pushes a value rather than waiting for this
+        cycle.
 
         Returns:
-            The data from the API as a dictionary.
+            The current ``NapoleonBBQGrillState`` snapshot.
 
         Raises:
-            ConfigEntryAuthFailed: If authentication fails, triggers reauthentication.
-            UpdateFailed: If data fetching fails for other reasons, optionally with retry_after.
-        """
-        try:
-            # Optional: Get active entity contexts to optimize data fetching
-            # listening_contexts = set(self.async_contexts())
-            # LOGGER.debug("Active entity contexts: %s", listening_contexts)
+            UpdateFailed: If a BLE write error occurs during polling.
 
-            # Fetch data from API
-            # In production, you could pass listening_contexts to optimize the API call:
-            # return await self.config_entry.runtime_data.client.async_get_data(listening_contexts)
-            return await self.config_entry.runtime_data.client.async_get_data()
-        except NapoleonBBQApiClientAuthenticationError as exception:
-            LOGGER.warning("Authentication error - %s", exception)
-            raise ConfigEntryAuthFailed(
-                translation_domain="napoleon_bbq",
-                translation_key="authentication_failed",
-            ) from exception
-        except NapoleonBBQApiClientError as exception:
-            LOGGER.exception("Error communicating with API")
-            # If the API provides rate limit information, you can honor it:
-            # if hasattr(exception, 'retry_after'):
-            #     raise UpdateFailed(retry_after=exception.retry_after) from exception
+        """
+        if not self.authenticated:
+            return self.data
+        try:
+            await self._poll_properties()
+        except Exception as exception:
             raise UpdateFailed(
-                translation_domain="napoleon_bbq",
+                translation_domain=DOMAIN,
                 translation_key="update_failed",
             ) from exception
+        return self.data
+
+    async def async_shutdown(self) -> None:
+        """
+        Shut down the coordinator cleanly.
+
+        Tears down BLE state (cancels advertisement callback, disconnects client)
+        then delegates to the DataUpdateCoordinator base class.
+        """
+        await self._shutdown_ble()
+        await super().async_shutdown()
