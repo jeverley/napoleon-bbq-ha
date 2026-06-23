@@ -5,29 +5,40 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from custom_components.napoleon_bbq.const import PARALLEL_UPDATES as PARALLEL_UPDATES
-from homeassistant.components.switch import SwitchEntityDescription
 
-from .example_switch import ENTITY_DESCRIPTIONS as SWITCH_DESCRIPTIONS, NapoleonBBQSwitch
+from .battery_saver import ENTITY_DESCRIPTIONS as BATTERY_SAVER_DESCRIPTIONS, NapoleonBBQBatterySaverSwitch
+from .lcd_off import ENTITY_DESCRIPTIONS as LCD_OFF_DESCRIPTIONS, NapoleonBBQLcdOffSwitch
 
 if TYPE_CHECKING:
     from custom_components.napoleon_bbq.data import NapoleonBBQConfigEntry
     from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
-# Combine all entity descriptions from different modules
-ENTITY_DESCRIPTIONS: tuple[SwitchEntityDescription, ...] = (*SWITCH_DESCRIPTIONS,)
+    from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: NapoleonBBQConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the switch platform."""
-    async_add_entities(
-        NapoleonBBQSwitch(
-            coordinator=entry.runtime_data.coordinator,
-            entity_description=entity_description,
+    for subentry_id, coordinator in entry.runtime_data.items():
+        async_add_entities(
+            (
+                NapoleonBBQLcdOffSwitch(
+                    coordinator=coordinator,
+                    entity_description=entity_description,
+                )
+                for entity_description in LCD_OFF_DESCRIPTIONS
+            ),
+            config_subentry_id=subentry_id,
         )
-        for entity_description in SWITCH_DESCRIPTIONS
-    )
+        async_add_entities(
+            (
+                NapoleonBBQBatterySaverSwitch(
+                    coordinator=coordinator,
+                    entity_description=entity_description,
+                )
+                for entity_description in BATTERY_SAVER_DESCRIPTIONS
+            ),
+            config_subentry_id=subentry_id,
+        )

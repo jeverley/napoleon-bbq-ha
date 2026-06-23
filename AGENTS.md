@@ -4,7 +4,7 @@ This document provides guidance for AI coding agents working on this Home Assist
 
 ## Project Overview
 
-This is a Home Assistant custom integration that was generated from a blueprint template. The integration follows Home Assistant Core development patterns and quality standards.
+This is a Home Assistant custom integration for Napoleon Prestige BBQ grills. The integration uses Ayla Local Control v2 (JSON over GATT, HMAC-SHA256 authentication) for direct BLE communication with each grill; the Ayla cloud API is used only at setup time to fetch per-device BLE local keys. It follows Home Assistant Core development patterns and quality standards.
 
 **Integration details:**
 
@@ -79,7 +79,7 @@ If a developer requests something that contradicts these instructions:
 
 ### Maintaining These Instructions
 
-**This project was recently initialized from a template.** Instructions should evolve as the project matures:
+**Keep these instructions current.** As the integration evolves:
 
 - Refine guidelines based on actual project needs
 - Remove outdated rules that no longer apply
@@ -150,7 +150,7 @@ As an AI agent, **aim for Silver or Gold Quality Scale** when generating code:
 
 - ✅ **Always implement:** Type hints, async patterns, proper error handling, service registration in `async_setup()`, diagnostics with `async_redact_data()`, device info
 - 🎯 **When applicable:** Config flow with validation, reauth flow, discovery support, repair flows
-- 📋 **Can defer:** Multiple config entries, advanced discovery, YAML import, extensive test coverage
+- 📋 **Can defer:** Advanced discovery, YAML import, extensive test coverage
 
 **Developer expectation:** Generate production-ready code. Implement HA standards with reasonable effort.
 
@@ -202,29 +202,33 @@ This integration uses the following identifiers consistently:
 
 **Package organization (DO NOT create other packages):**
 
-- `api/` - API client and exceptions
-- `coordinator/` - Data update coordinator
-- `config_flow_handler/` - Config flow, options, validators, schemas
-  - `validators/*.py` - Config flow validation functions
-  - `schemas/*.py` - Data schemas for config flow steps
-- `entity/` - Base entity classes
-- `entity_utils/` - Entity-specific helpers (device_info, state formatting)
-- `[platform]/` - Entity platforms (sensor, switch, etc.)
-- `service_actions/` - Service action implementations
-- `utils/` - Integration-wide utilities (string helpers, general validators)
+- `api/` — Ayla cloud API client and exceptions (`client.py`; used only at config-flow time to fetch `local_key`)
+- `bluetooth/` — Ayla Local Control v2 BLE protocol helpers (`protocol.py`: framing, HMAC, JSON codec)
+- `coordinator/` — BLE `DataUpdateCoordinator` (`base.py`: coordinator class; `listeners.py`: BLE mixin)
+- `config_flow_handler/` — Config flow, options flow, subentry flow
+  - `schemas/` — Voluptuous schemas for flow forms (`options.py`)
+- `entity/` — Base entity class (`base.py`)
+- `entity_utils/` — Entity helpers (`device_info.py`)
+- `[platform]/` — Entity platforms (sensor, binary_sensor, switch, select, number, button)
+
+**Create when needed (not yet present):**
+
+- `service_actions/` — service action handlers, if service actions are added
+- `utils/` — integration-wide utilities (MAC format helpers, input sanitisation, etc.)
+- `config_flow_handler/validators/` — flow-specific validation functions, if validation logic grows too large to keep inline
 
 **Do NOT create:**
 
-- `helpers/`, `ha_helpers/`, or similar packages - use `utils/` or `entity_utils/` instead
-- `common/`, `shared/`, `lib/` - use existing packages above
+- `helpers/`, `ha_helpers/`, or similar packages — use `utils/` or `entity_utils/` instead
+- `common/`, `shared/`, `lib/` — use existing packages above
 - New top-level packages without explicit approval
 
 **Key patterns:**
 
-- Entities → Coordinator → API Client (never skip layers)
+- Entities → Coordinator → BLE client (never skip layers)
 - Each platform in own directory with `__init__.py`
 - One entity class per file for clarity
-- Individual entity classes in separate files (e.g., `air_quality.py`)
+- Individual entity classes in separate files (e.g., `probe_temp.py`, `gas_tank_weight.py`)
 - Use `EntityDescription` dataclasses for static entity metadata
 
 **Code organization principles:**
@@ -238,6 +242,28 @@ This integration uses the following identifiers consistently:
 - `.github/instructions/blueprint.entities.instructions.md` - Entity platform patterns
 - `.github/instructions/blueprint.coordinator.instructions.md` - Coordinator implementation
 - `.github/instructions/blueprint.api.instructions.md` - API client patterns
+
+### Hub and Sub-entry Architecture
+
+This integration uses a hub/sub-entry model — **not** a single-config-entry-per-device model:
+
+- **Hub entry** (one per Napoleon account) — stores `{CONF_REGION, CONF_USERNAME}`; unique ID is `f"{username.lower()}_{region_key}"` (e.g. `"user@example.com_eu"`)
+- **Sub-entry** (one per grill) — stores `{CONF_MAC, CONF_DSN, CONF_LOCAL_KEY}`; unique ID is the BLE MAC address in lowercase (e.g. `"ec:64:c9:05:1f:2a"`)
+
+**Type aliases (see `data.py`):**
+
+- `NapoleonBBQConfigEntry = ConfigEntry[NapoleonBBQCoordinators]`
+- `NapoleonBBQCoordinators = dict[str, NapoleonBBQDataUpdateCoordinator]` — keyed by `subentry_id` (not DSN, not MAC)
+
+**`runtime_data`** is `NapoleonBBQCoordinators` (a plain `dict`). The `__init__.py` setup loop iterates `entry.subentries.items()` and filters by `subentry_type == SUBENTRY_TYPE_DEVICE`.
+
+**Critical rules:**
+
+- `ConfigSubentry.data` **must** be a `MappingProxyType` when constructing a `ConfigSubentry` for `async_add_subentry` directly
+- `ConfigFlowHandler` **must** implement `async_get_supported_subentry_types()` returning `{SUBENTRY_TYPE_DEVICE: NapoleonBBQGrillSubentryFlowHandler}`
+- When adding entities for a sub-entry, pass `config_subentry_id=subentry_id` to `AddConfigEntryEntitiesCallback` — omitting it silently attaches entities to the hub entry, breaking device attribution
+
+**MAC casing convention:** stored uppercase in config data (`CONF_MAC: "EC:64:C9:05:1F:2A"`), lowercase for unique IDs (`unique_id="ec:64:c9:05:1f:2a"`).
 
 ### Device Info
 
@@ -322,33 +348,120 @@ python3 -m script.scaffold config_flow_oauth2     # OAuth2 flow
 - Implement in `config_flow_handler/` package
 - Support user setup, discovery, reauth, reconfigure
 - Always set unique_id for discovered entries
+- **Design:** each setup run adds exactly one grill. The Ayla cloud API returns DSN + display name but not BLE MAC addresses, so MACs must be either user-entered (manual setup) or supplied by BLE advertisement discovery. The `pick_device` screen is shown only when an account has multiple unconfigured grills.
 
 See `.github/instructions/blueprint.config_flow.instructions.md` for comprehensive patterns.
 
-**Service actions:**
-
-- Define in `services.yaml` with full descriptions (legacy filename)
-- Implement handlers in `service_actions/` directory
-- **Register in `async_setup()`** - NOT in `async_setup_entry()` (Quality Scale!)
-- Format: `<integration_domain>.<action_name>`
-
-See `.github/instructions/blueprint.service_actions.instructions.md` for service patterns.
-
 **Coordinator:**
 
-- Entities → Coordinator → API Client (never skip layers)
+- Entities → Coordinator → BLE client (never skip layers)
+- Uses persistent BLE connection (not poll-and-disconnect)
 - Raise `ConfigEntryAuthFailed` (triggers reauth) or `UpdateFailed` (retry)
-- Use `async_config_entry_first_refresh()` for first update
+- Use `async_config_entry_first_refresh()` for first update — returns empty state if grill offline (no error)
+
+**BLE / Bluetooth:**
+
+- Protocol: Ayla Local Control v2 (JSON over GATT, HMAC-SHA256 auth) — see `bluetooth/protocol.py`
+- Characteristics: Inbox `01000001-fe28-435b-991a-f1b21bb9bcd0` (write), Outbox `01000002-fe28-435b-991a-f1b21bb9bcd0` (notify)
+- Auth flow: app sends `Oac t:1`, grill replies with nonce, app computes HMAC and sends `Oac t:2`, grill confirms
+- Poll: send `Gpr {"n": "<property>"}` → grill replies with `gpr {"n": ..., "v": ...}` (no ACK needed)
+- Push: grill sends `Odp {"n": ..., "v": ..., "e": 1, "t": <type>}` → app ACKs with `odp` (same `i`, name only); coordinator calls `async_set_updated_data` immediately
+- Write: send `Opr {"n": ..., "t": <type_code>, "v": <value>}` → grill replies with `opr`; `ukn {"o":"ukn","i":N,"s":3}` means invalid command (uses `s` not `p`)
+- Ayla type codes for `t` field in `Opr`/`gpr`/`Odp`: `0`=int, `1`=decimal, `3`=bool, `4`=string
+- **Odp/WiFi interaction (critical):** when grill has active WiFi/MQTT, it does NOT push `PRB_TMP_*` temperatures via BLE — they go via MQTT to Ayla cloud instead. State-change pushes (`PRB_STAT`, `TUNIT`, `LCD_OFF` etc.) still arrive over BLE. This is why `Gpr` polling at 30 s is required for temperature values in normal home use.
+- Connection lifecycle: `_connecting: bool` flag prevents concurrent `_connect_and_run` tasks from rapid advertisements; on disconnect `_on_disconnect` re-registers the advertisement callback so the coordinator reconnects when the grill powers on again
+- Failure cap: after `MAX_CONNECT_FAILURES = 5` consecutive failures in `_connect_and_run`, the advertisement callback is **not** re-registered — auto-reconnect stops until the config entry is reloaded; the `_connect_failures` counter resets to 0 after a successful authentication
+- Library: `bleak-retry-connector` (`establish_connection` + `BleakClientWithServiceCache`)
+- No BLE-layer bonding or encryption required (confirmed by hardware test); HMAC-SHA256 is the only auth gate
+
+**Prestige property sentinels and bitmasks:**
+
+- `PRB_TMP_*` = `4095.0` when probe not connected; use `PRB_STAT` bitmask for `available` (more reliable than value sentinel)
+- `PRB_STAT` bitmask: bit 0 = probe 1, bit 1 = probe 2, bit 2 = probe 3, bit 3 = probe 4
+- `TNK_WT` = `-14400` when gas tank not configured
+- `PRB_TMP_FOUR` quirk: Prestige IF2 has 3 physical probe sockets; probe 4 reads 0.0 at ambient while physical probes read ~24 °C — may be an internal grill thermistor that only reports values when the burner heats the hood above ambient (unconfirmed)
+
+**GATT readable characteristics (service `0000fe28`, readable without auth):**
+
+| Short UUID      | APK name                     | Example value                                              |
+| --------------- | ---------------------------- | ---------------------------------------------------------- |
+| `00000001-fe28` | `GATT_CHAR_DUID`             | `"AC000W035497852"` (DSN / serial number)                  |
+| `00000002-fe28` | `GATT_CHAR_OEM_ID`           | `"146516a1"` (Napoleon's Ayla OEM ID — not used in crypto) |
+| `00000003-fe28` | `GATT_CHAR_OEM_MODEL`        | `"thermometer-mqtt-eu"` (EU); `"thermometer-mqtt-us"` (US) |
+| `00000004-fe28` | `GATT_CHAR_TEMPLATE_VERSION` | `"v3.0.19"` (firmware)                                     |
+| `00000006-fe28` | `GATT_CHAR_DISPLAY_NAME`     | `"Prestige-1F2"`                                           |
+
+**Prestige property name reference (confirmed from APK — `NapProperty.PRESTIGE`):**
+
+Temperature / sensors:
+
+| Property                                   | Meaning                                               |
+| ------------------------------------------ | ----------------------------------------------------- |
+| `PRB_TMP_ONE` / `TWO` / `THREE` / `FOUR`   | Probe 1–4 temperature (4095.0 = disconnected)         |
+| `PRB_STAT`                                 | Probe connected state bitmask (bits 0–3 = probes 1–4) |
+| `TRGT_TMP_ONE` / `TWO` / `THREE` / `FOUR`  | Target temperature probe 1–4                          |
+| `TRGT_STAT_ONE` / `TWO` / `THREE` / `FOUR` | Target temperature state probe 1–4                    |
+
+Timers:
+
+| Property                                      | Meaning               |
+| --------------------------------------------- | --------------------- |
+| `CKTIME`                                      | Cook time             |
+| `TMR_STAT_ONE` / `TWO` / `THREE` / `FOUR`     | Timer state probe 1–4 |
+| `TMR_ALRT_PRB_ONE` / `TWO` / `THREE` / `FOUR` | Timer alert probe 1–4 |
+| `TMP_ALRT_PRB_ONE` / `TWO` / `THREE` / `FOUR` | Temp alert probe 1–4  |
+
+Settings:
+
+| Property     | Meaning                                    |
+| ------------ | ------------------------------------------ |
+| `TUNIT`      | Temperature unit (0=Celsius, 1=Fahrenheit) |
+| `BSMODE`     | Battery/screen saver mode (0=off, 1=on)    |
+| `LCD_OFF`    | Knob backlights off (1=off)                |
+| `BRT_LVL`    | Brightness level                           |
+| `AUTO_T_OUT` | Auto timeout                               |
+| `DEVC_NME`   | Device name                                |
+| `TOFF`       | Turn off                                   |
+
+Gas tank:
+
+| Property      | Meaning                                     |
+| ------------- | ------------------------------------------- |
+| `GS_UNT`      | Gas unit (0=kg, 1=lbs)                      |
+| `GS_TNK_NAME` | Gas tank name                               |
+| `TNK_WT`      | Tank weight (-14400 = not configured)       |
+| `EMTY_TNK_W`  | Empty tank weight                           |
+| `F_TNKWT`     | Full tank weight                            |
+| `NTC_VLU`     | NTC thermistor reading (tank weight sensor) |
+
+Probe / cook names:
+
+| Property                                             | Meaning               |
+| ---------------------------------------------------- | --------------------- |
+| `PRB_ONE_NME` / `TWO_NME` / `THREE_NME` / `FOUR_NME` | Probe 1–4 custom name |
+| `CKNME_PRB_ONE` / `TWO` / `THREE` / `FOUR`           | Cook name probe 1–4   |
+
+System / misc:
+
+| Property            | Meaning           |
+| ------------------- | ----------------- |
+| `version`           | Firmware version  |
+| `oem_host_version`  | OEM host version  |
+| `RSSI`              | RSSI value        |
+| `BT_LVL`            | Battery level     |
+| `RST_CNT`           | Reset count       |
+| `battery_low_alert` | Battery low alert |
 
 See `.github/instructions/blueprint.coordinator.instructions.md` and `.github/instructions/blueprint.api.instructions.md` for details.
 
-**Entities:**
+**Service actions:**
 
-- Inherit from platform base + `NapoleonBBQEntity`
-- Read from `coordinator.data`, never call API directly
-- Use `EntityDescription` for static metadata
+- Define in `services.yaml` with full descriptions
+- Implement handlers in `service_actions/` directory (create it when needed)
+- **Register in `async_setup()`** — NOT in `async_setup_entry()` (Quality Scale!)
+- Format: `<integration_domain>.<action_name>`
 
-See `.github/instructions/blueprint.entities.instructions.md` for entity patterns.
+See `.github/instructions/blueprint.service_actions.instructions.md` for service patterns.
 
 **Repairs:**
 
@@ -359,10 +472,19 @@ See `.github/instructions/blueprint.entities.instructions.md` for entity pattern
 
 See `.github/instructions/blueprint.repairs.instructions.md` for comprehensive patterns.
 
+**Entities:**
+
+- Inherit from platform base + `NapoleonBBQEntity`
+- Read from `coordinator.data`, never call API directly
+- Use `EntityDescription` for static metadata
+
+See `.github/instructions/blueprint.entities.instructions.md` for entity patterns.
+
 **Entity availability:**
 
-- Set `_attr_available = False` when device is unreachable
-- Update availability based on coordinator success/failure
+- BLE entities must gate on `coordinator.authenticated`, **not** `coordinator.last_update_success`
+- The coordinator stays alive (and `last_update_success` remains True) even when the grill is not connected; only `authenticated` reflects a live, authenticated BLE session
+- Add entity-specific conditions on top (e.g. probe sensors also check `coordinator.data.probe_connected(probe)`)
 - Don't raise exceptions from `@property` methods
 
 **State updates:**

@@ -6,52 +6,97 @@ This document describes the technical architecture of the Napoleon BBQ custom co
 
 ```text
 custom_components/napoleon_bbq/
-├── __init__.py              # Integration setup and unload
-├── config_flow.py           # Config flow entry point
-├── const.py                 # Constants and configuration keys
-├── coordinator/             # Data update coordinator package
-│   ├── __init__.py          # Exports NapoleonBBQDataUpdateCoordinator
-│   ├── base.py              # Main coordinator class
-│   ├── data_processing.py   # Data validation and transformation
-│   ├── error_handling.py    # Error recovery and retry logic
-│   └── listeners.py         # Entity callbacks and event listeners
-├── data.py                  # Data classes and type definitions
-├── diagnostics.py           # Diagnostic data for troubleshooting
-├── entity/                  # Base entity package
-│   ├── __init__.py          # Exports NapoleonBBQEntity
-│   └── base.py              # Base entity class implementation
-├── manifest.json            # Integration metadata
-├── repairs.py               # Repair flows for fixing issues
-├── services.yaml            # Service action definitions (legacy filename)
-├── api/                     # External API communication
+├── __init__.py                   # Integration setup and unload; hub/subentry coordinator loop
+├── config_flow.py                # Thin re-export required by hassfest
+├── const.py                      # Constants, GATT UUIDs, Ayla credentials, timing constants
+├── data.py                       # Type aliases and NapoleonBBQGrillState dataclass
+├── diagnostics.py                # Diagnostic data redaction
+├── manifest.json                 # Integration metadata
+├── translations/
+│   └── en.json                   # English translations
+│
+├── api/                          # Ayla cloud API client (setup time only)
 │   ├── __init__.py
-│   └── client.py            # API client implementation
-├── config_flow_handler/     # Config flow implementation
-│   ├── __init__.py          # Package exports
-│   ├── handler.py           # Backward compatibility wrapper
-│   ├── config_flow.py       # Main config flow (user, reauth, reconfigure)
-│   ├── options_flow.py      # Options flow
-│   ├── subentry_flow.py     # Subentry flow template
-│   ├── schemas/             # Voluptuous schemas
-│   │   ├── __init__.py      # Schema exports
-│   │   ├── config.py        # Config flow schemas
-│   │   └── options.py       # Options flow schemas
-│   └── validators/          # Input validation
-│       ├── __init__.py      # Validator exports
-│       ├── credentials.py   # Credential validation
-│       └── sanitizers.py    # Input sanitizers
-├── entity_utils/            # Entity helper utilities
+│   └── client.py                 # NapoleonBBQApiClient: auth, device list, local key fetch
+│
+├── bluetooth/                    # Ayla Local Control v2 BLE protocol (Napoleon BBQ addition)
 │   ├── __init__.py
-│   ├── device_info.py       # Device information helpers
-│   └── state_helpers.py     # State management utilities
-├── service_actions/         # Service action implementations
+│   └── protocol.py               # Framing, HMAC-SHA256, JSON encode/decode
+│
+├── coordinator/                  # BLE DataUpdateCoordinator
 │   ├── __init__.py
-│   └── example_service.py   # Example service action handler
-├── translations/            # Localization files
-│   └── en.json              # English translations
-└── <platform>/              # Platform-specific implementations
-    ├── __init__.py          # Platform setup
-    └── <entity>.py          # Individual entity implementations
+│   ├── base.py                   # NapoleonBBQDataUpdateCoordinator class
+│   └── listeners.py              # NapoleonBBQBLEMixin: connection lifecycle, auth, GATT routing
+│
+├── config_flow_handler/          # Config and options flows
+│   ├── __init__.py               # Re-exports all flow handler classes
+│   ├── config_flow.py            # Main flow: BLE discovery, user setup, reauth
+│   ├── options_flow.py           # Options flow: poll interval
+│   ├── subentry_flow.py          # Subentry flow: add grill to existing account hub
+│   └── schemas/
+│       ├── __init__.py
+│       └── options.py            # Options flow Voluptuous schema
+│
+├── entity/                       # Base entity
+│   ├── __init__.py
+│   └── base.py                   # NapoleonBBQEntity: unique_id, device_info, coordinator binding
+│
+├── entity_utils/                 # Shared entity helpers
+│   ├── __init__.py
+│   └── device_info.py            # DeviceInfo builder for sub-entry devices
+│
+├── binary_sensor/
+│   ├── __init__.py
+│   ├── connected.py              # BLE connection state sensor
+│   └── probe_connected.py        # Per-probe physical connection sensor
+│
+├── button/
+│   ├── __init__.py
+│   └── turn_off.py               # Turn off grill button (TOFF property)
+│
+├── number/
+│   ├── __init__.py
+│   └── target_temp.py            # Target temperature per probe (TRGT_TMP_*)
+│
+├── select/
+│   ├── __init__.py
+│   ├── brightness.py             # Knob backlight brightness (BRT_LVL)
+│   ├── gas_unit.py               # Gas unit (GS_UNT: kg/lbs)
+│   └── temp_unit.py              # Temperature unit (TUNIT: °C/°F)
+│
+├── sensor/
+│   ├── __init__.py
+│   ├── diagnostic.py             # Diagnostic sensors (RSSI, firmware version, etc.)
+│   └── probe_temp.py             # Probe temperature sensors (PRB_TMP_ONE–FOUR)
+│
+└── switch/
+    ├── __init__.py
+    ├── battery_saver.py          # Battery/screen saver mode (BSMODE)
+    └── lcd_off.py                # Knob backlights off (LCD_OFF)
+```
+
+## Hub and Sub-entry Architecture
+
+> **Napoleon BBQ:** This integration uses a hub/sub-entry model rather than the single-coordinator
+> pattern described in the blueprint template.
+
+- **One config entry per Napoleon account** (the hub). Hub data: `{CONF_REGION, CONF_USERNAME}`.
+- **One `ConfigSubentry` per grill**. Sub-entry data: `{CONF_MAC, CONF_DSN, CONF_LOCAL_KEY}`.
+
+```text
+ConfigEntry (hub — one per account)
+├── ConfigSubentry (grill 1)  ← CONF_MAC, CONF_DSN, CONF_LOCAL_KEY
+├── ConfigSubentry (grill 2)
+└── ...
+```
+
+`entry.runtime_data` is `dict[str, NapoleonBBQDataUpdateCoordinator]` keyed by `subentry_id`.
+
+Type aliases (in `data.py`):
+
+```python
+NapoleonBBQCoordinators = dict[str, NapoleonBBQDataUpdateCoordinator]
+NapoleonBBQConfigEntry = ConfigEntry[NapoleonBBQCoordinators]
 ```
 
 ## Core Components
@@ -60,75 +105,97 @@ custom_components/napoleon_bbq/
 
 **Directory:** `coordinator/`
 
-The coordinator package manages periodic data fetching from the external API and distributes
-updates to all entities. It is organized as a package with separate modules for different concerns:
+> **Napoleon BBQ:** The coordinator holds a persistent BLE connection rather than polling an HTTP
+> API. The `NapoleonBBQBLEMixin` in `listeners.py` owns the full BLE lifecycle; `base.py` owns
+> the periodic poll.
 
 **Package structure:**
 
-- `base.py` - Main coordinator class (`NapoleonBBQDataUpdateCoordinator`)
-- `data_processing.py` - Data validation, transformation, and caching utilities
-- `error_handling.py` - Error recovery strategies, retry logic, and circuit breaker patterns
-- `listeners.py` - Entity callbacks, event listeners, and performance monitoring
+- `base.py` — `NapoleonBBQDataUpdateCoordinator`: inherits from `DataUpdateCoordinator[NapoleonBBQGrillState]` and `NapoleonBBQBLEMixin`. Manages the complete grill lifecycle: initial setup, periodic property polling, and clean shutdown.
+- `listeners.py` — `NapoleonBBQBLEMixin`: owns the entire BLE connection lifecycle (advertisement callback, connect, authenticate, GATT routing).
 
 **Core functionality:**
 
-- Configurable update interval (default: 5 minutes)
-- Error handling with exponential backoff
-- Shared data access for all entities
-- Automatic retry on transient failures
-- Data validation and transformation before distribution
-- Performance monitoring and metrics
+- `async_config_entry_first_refresh()` returns empty state (no error) when the grill is offline
+- `_async_update_data()` polls all properties via `Gpr` if BLE is authenticated
+- `async_shutdown()` tears down BLE state cleanly on unload
+
+**BLE connection details (`listeners.py`):**
+
+- Advertisement callback (`async_register_callback`) reconnects when the grill powers on
+- `_connect_and_run`: connects via `bleak-retry-connector`, settles MTU, subscribes to outbox, authenticates
+- `_connecting: bool` guard prevents concurrent connection attempts from rapid advertisements
+- `MAX_CONNECT_FAILURES = 5` cap: after 5 consecutive failures, auto-reconnect stops; reload the entry to resume
+- `_authenticate()`: sends `Oac t:1`, awaits HMAC challenge, computes `Oac t:2`, waits for auth OK event
+- `_on_notification()`: routes `oac`, `gpr`, `Odp`, `opr`, `ukn` opcodes
+- `_send_msg()`: fragments payload, serialises concurrent writes through an `asyncio.Lock`
 
 **Key class:** `NapoleonBBQDataUpdateCoordinator` (exported from `coordinator/__init__.py`)
 
-**Design rationale:**
+### BLE Protocol
 
-The coordinator is structured as a package rather than a single file to support future extensibility:
+**Directory:** `bluetooth/`
 
-- **Separation of concerns**: Core logic, error handling, and data processing are isolated
-- **Easy extension**: New features (caching, metrics, webhooks) can be added as new modules
-- **Maintainability**: Individual modules stay focused and manageable (<400 lines)
-- **Testability**: Each module can be tested independently
+> **Napoleon BBQ addition:** This package implements Ayla Local Control v2 over GATT and has no
+> equivalent in the blueprint template.
+
+Implements Ayla Local Control v2 over GATT:
+
+- Inbox characteristic (write): `01000001-fe28-435b-991a-f1b21bb9bcd0`
+- Outbox characteristic (notify): `01000002-fe28-435b-991a-f1b21bb9bcd0`
+- Fragmentation: each chunk prefixed with a 1-byte header (last=`0x00`, more=`0x40|len`)
+- Authentication: HMAC-SHA256 over the grill-supplied nonce using the Ayla `local_key`
+- JSON envelope: `{"o": "<opcode>", "i": <seq>, "p": {<payload>}}`
+
+**Key module:** `bluetooth/protocol.py`
 
 ### API Client
 
 **Directory:** `api/`
 
-Handles all communication with external APIs or devices. Implements:
+> **Napoleon BBQ:** The API client is used **only at config-flow time**. At runtime the integration
+> communicates exclusively over BLE.
+
+Handles all communication with the Ayla cloud API. Implements:
 
 - Async HTTP requests using `aiohttp`
-- Connection management and timeouts
-- Authentication handling
+- Authentication against the Ayla cloud and listing all Prestige grills in an account
+- Per-device BLE `local_key` fetch (`async_get_local_key`, `async_refresh_local_keys`)
 - Error translation to custom exceptions
 
-**Key class:** `NapoleonBBQApiClient`
+**Key class:** `NapoleonBBQApiClient` (in `api/client.py`)
 
 ### Config Flow
 
 **Directory:** `config_flow_handler/`
 
-Implements the configuration UI for adding and configuring the integration. The package
-is organized modularly to support complex flows without becoming monolithic.
+> **Napoleon BBQ:** Uses a hub/sub-entry model. Three flows are implemented rather than the single
+> user+reauth pattern in the blueprint template.
+
+Implements the configuration UI for adding and configuring the integration.
 
 **Structure:**
 
-- `config_flow.py`: Main flow (user setup, reauth, reconfigure)
-- `options_flow.py`: Options flow for post-setup configuration
-- `schemas/`: Voluptuous schemas for all forms
-- `validators/`: Validation logic separated from flow logic
-- `subentry_flow.py`: Template for multi-device/location support
+- `config_flow.py`: Main flow — BLE discovery, user setup, reauth; creates the hub entry
+- `options_flow.py`: Options flow for poll interval configuration
+- `schemas/`: Voluptuous schemas for options forms
+- `subentry_flow.py`: Sub-entry flow — adds a grill to an existing account hub
 
-**Supported flows:**
+| Flow       | Handler                                | Purpose                                  |
+| ---------- | -------------------------------------- | ---------------------------------------- |
+| Main setup | `NapoleonBBQConfigFlowHandler`         | Create hub entry + first grill sub-entry |
+| Subentry   | `NapoleonBBQGrillSubentryFlowHandler`  | Add another grill to an existing hub     |
+| Reauth     | Step in `NapoleonBBQConfigFlowHandler` | Refresh `local_key` for all sub-entries  |
 
-- Initial user setup with validation
-- Options flow for reconfiguration
-- Reauthentication flow for expired credentials
-- Ready for subentry flows (multi-device support)
+Each setup run adds exactly one grill. The Ayla cloud API returns DSN + display name but not BLE MAC
+addresses, so MACs must be entered by the user (manual setup) or supplied by BLE advertisement
+discovery.
 
 **Key classes:**
 
-- `NapoleonBBQConfigFlowHandler` (main flow)
-- `NapoleonBBQOptionsFlow` (options)
+- `NapoleonBBQConfigFlowHandler` (main flow, in `config_flow_handler/config_flow.py`)
+- `NapoleonBBQGrillSubentryFlowHandler` (sub-entry flow, in `config_flow_handler/subentry_flow.py`)
+- `NapoleonBBQOptionsFlow` (options, in `config_flow_handler/options_flow.py`)
 
 ### Base Entity
 
@@ -136,12 +203,32 @@ is organized modularly to support complex flows without becoming monolithic.
 
 Provides common functionality for all entities in the integration:
 
-- Device information
+- Device information (via `entity_utils/device_info.py`)
 - Unique ID generation
 - Coordinator integration
 - Availability tracking
 
+> **Napoleon BBQ:** Availability is gated on `coordinator.authenticated` (BLE authentication
+> state), not `last_update_success`. Individual entities may add further conditions (e.g., probe
+> connected bitmask).
+
 **Key class:** `NapoleonBBQEntity` (in `entity/base.py`)
+
+### Grill State
+
+> **Napoleon BBQ addition:** Holds the live state received from the grill and has no equivalent in
+> the blueprint template.
+
+**File:** `data.py` — `NapoleonBBQGrillState`
+
+Holds the live state received from the grill. Updated by both:
+
+- **Push** — `Odp` notifications for state-change events (settings, probe connected bitmask, etc.)
+- **Poll** — `Gpr` requests every 30 s for temperature values
+
+When a grill has active WiFi/MQTT, it suppresses `PRB_TMP_*` temperature pushes over BLE (they go
+via MQTT to the Ayla cloud instead). `Gpr` polling is therefore required for temperature readings
+in normal home use.
 
 ## Platform Organization
 
@@ -158,42 +245,45 @@ Platform entities inherit from both:
 1. Home Assistant platform base (e.g., `SensorEntity`)
 2. `NapoleonBBQEntity` for common functionality
 
+Availability is gated on `coordinator.authenticated` (not `last_update_success`), with additional
+entity-specific conditions (e.g., probe connected bitmask for probe sensors).
+
 ## Data Flow
 
 ```text
-┌─────────────────┐
-│  Config Entry   │ ← Created by config flow
-└────────┬────────┘
+BLE Advertisement (grill powers on)
          │
          ▼
-┌─────────────────┐
-│   Coordinator   │ ← Fetches data from API every 5 min
-└────────┬────────┘
-         │
+NapoleonBBQBLEMixin._on_advertisement
+         │ schedules
          ▼
-    ┌────┴────┐
-    │  Data   │ ← Stored in coordinator.data
-    └────┬────┘
-         │
-    ┌────┴────────────────┐
-    │                     │
-    ▼                     ▼
-┌─────────┐         ┌─────────┐
-│ Sensor  │         │ Switch  │ ← Entities read from coordinator
-└─────────┘         └─────────┘
+_connect_and_run → establish_connection → start_notify → _authenticate
+         │                                                     │
+         │                                              auth OK event set
+         ▼
+_async_update_data (every 30 s)          _on_notification (push)
+   sends Gpr for each prop                 routes Odp → updates state → ACKs
+         │                                         │
+         └──────────────┬──────────────────────────┘
+                        ▼
+              NapoleonBBQGrillState.update_from_property
+                        │
+              async_set_updated_data → entities update via coordinator
 ```
 
 ## AI Agent Instructions
 
-This project includes comprehensive instruction files for AI coding assistants (GitHub Copilot, Claude, etc.) to ensure consistent code generation that follows Home Assistant patterns and project conventions.
+This project includes comprehensive instruction files for AI coding assistants (GitHub Copilot,
+Claude, etc.) to ensure consistent code generation that follows Home Assistant patterns and project
+conventions.
 
 ### Instruction File Architecture
 
 **Layered approach:**
 
-1. **`AGENTS.md`** - High-level "survival guide" for all AI agents (project overview, workflow, validation)
-2. **`.github/instructions/*.instructions.md`** - Detailed path-specific patterns (applied based on file being edited)
-3. **`.github/copilot-instructions.md`** - GitHub Copilot-specific workflow guidance
+1. **`AGENTS.md`** — High-level "survival guide" for all AI agents (project overview, workflow, validation)
+2. **`.github/instructions/*.instructions.md`** — Detailed path-specific patterns (applied based on file being edited)
+3. **`.github/copilot-instructions.md`** — GitHub Copilot-specific workflow guidance
 
 ### Available Instruction Files
 
@@ -203,11 +293,13 @@ This project includes comprehensive instruction files for AI coding assistants (
 | `blueprint.yaml.instructions.md`               | `**/*.yaml`, `**/*.yml`                               | YAML formatting, Home Assistant YAML conventions                               |
 | `blueprint.json.instructions.md`               | `**/*.json`                                           | JSON formatting, schema validation, no trailing commas                         |
 | `blueprint.markdown.instructions.md`           | `**/*.md`                                             | Markdown formatting, documentation structure, linting                          |
+| `blueprint.shell.instructions.md`              | `**/*.sh`                                             | Shell script style and safety patterns                                         |
+| `blueprint.commit-message.instructions.md`     | Commit messages                                       | Conventional Commits format                                                    |
 | `blueprint.manifest.instructions.md`           | `**/manifest.json`                                    | Integration manifest requirements, quality scale, IoT class                    |
 | `blueprint.configuration_yaml.instructions.md` | `**/configuration.yaml`                               | Home Assistant configuration patterns (deprecated for device integrations)     |
 | `blueprint.config_flow.instructions.md`        | `**/config_flow_handler/**/*.py`, `**/config_flow.py` | Config flow patterns, discovery, reauth, reconfigure, unique IDs               |
 | `blueprint.service_actions.instructions.md`    | `**/service_actions/**/*.py`                          | Service action implementation, registration in `async_setup()`, error handling |
-| `blueprint.services_yaml.instructions.md`      | `**/services.yaml`                                    | Service action definitions, schema, descriptions, examples (legacy filename)   |
+| `blueprint.services_yaml.instructions.md`      | `**/services.yaml`                                    | Service action definitions, schema, descriptions, examples                     |
 | `blueprint.entities.instructions.md`           | Entity platform files                                 | Entity implementation, EntityDescription, device info, state management        |
 | `blueprint.coordinator.instructions.md`        | `**/coordinator/**/*.py`, `**/api/**/*.py`            | DataUpdateCoordinator patterns, error handling, caching, pull vs push          |
 | `blueprint.api.instructions.md`                | `**/api/**/*.py`, `**/coordinator/**/*.py`            | API client implementation, exceptions, rate limiting, pagination               |
@@ -217,7 +309,16 @@ This project includes comprehensive instruction files for AI coding assistants (
 | `blueprint.tests.instructions.md`              | `tests/**/*.py`                                       | Test patterns, fixtures, mocking, pytest conventions                           |
 
 > [!NOTE]
-> Entity platform files include: `alarm_control_panel/**/*.py`, `binary_sensor/**/*.py`, `button/**/*.py`, `camera/**/*.py`, `climate/**/*.py`, `cover/**/*.py`, `fan/**/*.py`, `humidifier/**/*.py`, `light/**/*.py`, `lock/**/*.py`, `number/**/*.py`, `select/**/*.py`, `sensor/**/*.py`, `siren/**/*.py`, `switch/**/*.py`, `vacuum/**/*.py`, `water_heater/**/*.py`, `entity/**/*.py`, `entity_utils/**/*.py`
+> The `blueprint.*` instruction files use generic placeholders and are synced from the upstream
+> template. Napoleon BBQ-specific patterns that diverge from the generic blueprint (BLE instead of
+> HTTP, hub/subentry instead of single coordinator) are documented in `AGENTS.md`.
+
+> [!NOTE]
+> Entity platform files include: `alarm_control_panel/**/*.py`, `binary_sensor/**/*.py`,
+> `button/**/*.py`, `camera/**/*.py`, `climate/**/*.py`, `cover/**/*.py`, `fan/**/*.py`,
+> `humidifier/**/*.py`, `light/**/*.py`, `lock/**/*.py`, `number/**/*.py`, `select/**/*.py`,
+> `sensor/**/*.py`, `siren/**/*.py`, `switch/**/*.py`, `vacuum/**/*.py`, `water_heater/**/*.py`,
+> `entity/**/*.py`, `entity_utils/**/*.py`
 
 ### Instruction File Application
 
@@ -236,55 +337,26 @@ applyTo:
 
 Typically read `AGENTS.md` for project overview and may use path-specific instructions when available.
 
-### Benefits
-
-- ✅ **Consistent code quality** - AI generates code that passes validation on first run
-- ✅ **Home Assistant patterns** - Follows Core development standards and best practices
-- ✅ **Context-aware** - File-specific instructions ensure appropriate patterns
-- ✅ **Reduced iteration** - Fewer validation errors and corrections needed
-- ✅ **Knowledge transfer** - Instructions document project conventions and decisions
-
 ### Maintaining Instructions
 
 - Keep `AGENTS.md` concise (high-level guidance only, ~30,000 ft view)
 - Put detailed patterns in path-specific `.instructions.md` files
 - Update instructions when patterns change or new conventions emerge
 - Remove outdated rules to prevent bloat
-- Document major architectural decisions in `DECISIONS.md`
+- Document major architectural decisions in `DECISIONS.MD`
 
 ### Using GitHub Copilot Coding Agent
 
-**GitHub Copilot Coding Agent** ([github.com/copilot/agents](https://github.com/copilot/agents)) can autonomously initialize new projects from this template and implement features.
+**GitHub Copilot Coding Agent** can autonomously implement features and raise pull requests.
 
-**Template Initialization:**
-
-When creating a repository from this template, you can provide a prompt to Copilot Coding Agent that includes:
-
-- Integration domain, title, and repository details
-- Instructions to run `initialize.sh` in unattended mode with `--force` flag
-- The agent will set up the project and create an initialization pull request
-
-**Working with initialized projects:**
-
-Once a project is initialized, Copilot Coding Agent:
+Once the project is set up, Copilot Coding Agent:
 
 - Automatically reads all instruction files (`AGENTS.md`, `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`)
 - Runs validation scripts (`script/check`) to verify changes
 - Creates pull requests with comprehensive implementations
 - Can iterate based on test failures and linter errors
 
-**Agent-specific instructions (since November 2025):**
-
-Use `excludeAgent` frontmatter to control which agents use specific instructions:
-
-```yaml
----
-applyTo: "**/*.py"
-excludeAgent: "code-review" # Only coding-agent uses this
----
-```
-
-See [`COPILOT_AGENT.md`](./COPILOT_AGENT.md) for detailed usage instructions, example prompts, and troubleshooting.
+See [COPILOT_AGENT.md](./COPILOT_AGENT.md) for detailed usage instructions, example prompts, and troubleshooting.
 
 ## Key Design Decisions
 
@@ -292,31 +364,39 @@ See [DECISIONS.md](./DECISIONS.md) for architectural and design decisions made d
 
 ## Extension Points
 
-To add new functionality:
-
 ### Adding a New Platform
 
 1. Create directory: `custom_components/napoleon_bbq/<platform>/`
-2. Implement `__init__.py` with `async_setup_entry()`
+2. Implement `__init__.py` with `async_setup_entry()` — iterate `entry.runtime_data.items()` and call `async_add_entities(..., config_subentry_id=subentry_id)` for each coordinator
 3. Create entity classes inheriting from platform base + `NapoleonBBQEntity`
 4. Add platform to `PLATFORMS` in `const.py`
 
 ### Adding a New Service Action
 
 1. Create service action handler in `service_actions/<service_name>.py`
-2. Define service action in `services.yaml` (legacy filename) with schema
+2. Define service action in `services.yaml` with schema
 3. Register service action in `__init__.py:async_setup()` (NOT `async_setup_entry`)
 
 ### Modifying Data Structure
 
-1. Update coordinator data type in `coordinator.py`
-2. Adjust API client response parsing in `api/client.py`
-3. Update entity property implementations to match new structure
+1. Update `NapoleonBBQGrillState` in `data.py`
+2. Update `_on_notification()` in `coordinator/listeners.py` to handle the new property opcode
+3. Add the property key to the `Gpr` poll list in `_async_update_data()` if polling is needed
+4. Update entity property implementations to read from the new state fields
+
+### Modifying the BLE Protocol
+
+> **Napoleon BBQ addition:** Guidance for changes to the Ayla Local Control v2 BLE layer.
+
+1. **New opcode** — Add a handler branch in `NapoleonBBQBLEMixin._on_notification()` in `coordinator/listeners.py`
+2. **New GATT characteristic** — Add the UUID constant to `const.py`; update `_connect_and_run()` in `coordinator/listeners.py` to subscribe or write to it
+3. **Framing or authentication changes** — Update `bluetooth/protocol.py`; the `_send_msg()` and `_on_notification()` methods in `coordinator/listeners.py` call into the protocol module
+4. **New property** — Add the property key constant to `const.py`; extend `NapoleonBBQGrillState` in `data.py`; follow "Modifying Data Structure" above
 
 ## Testing Strategy
 
 - **Unit tests:** Test individual functions and classes in isolation
-- **Integration tests:** Test coordinator with mocked API
+- **Integration tests:** Test coordinator with mocked BLE connection
 - **Fixtures:** Shared test fixtures in `tests/conftest.py`
 
 Tests mirror the source structure under `tests/`.
@@ -325,7 +405,9 @@ Tests mirror the source structure under `tests/`.
 
 Core dependencies (see `manifest.json`):
 
-- `aiohttp` - Async HTTP client
-- Home Assistant 2025.7.0+ - Platform requirements
+- `bleak` — Async BLE client library
+- `bleak-retry-connector` — Robust BLE connection management with auto-retry
+- `aiohttp` — Async HTTP client (Ayla cloud API, setup time only)
+- Home Assistant 2025.7.0+ — Platform requirements
 
 Development dependencies (see `requirements_dev.txt`, `requirements_test.txt`).

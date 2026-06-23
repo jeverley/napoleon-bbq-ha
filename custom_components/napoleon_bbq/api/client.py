@@ -1,8 +1,16 @@
 """
-API Client for napoleon_bbq.
+Ayla cloud API client for napoleon_bbq.
 
-This module provides the API client for communicating with external services.
-It demonstrates proper error handling, authentication patterns, and async operations.
+This module provides the HTTP client used during config flow setup to authenticate
+with the Ayla IoT cloud and fetch the per-device BLE local key required for the
+Ayla Local Control v2 handshake.
+
+After initial setup the local key is stored in the config entry and the cloud API
+is not contacted again. All subsequent communication uses the BLE local key
+directly over Bluetooth.
+
+For more information on the Ayla cloud API:
+See _handover/CLAUDE.md — Cloud API section.
 
 For more information on creating API clients:
 https://developers.home-assistant.io/docs/api_lib_index
@@ -16,6 +24,8 @@ from typing import Any
 
 import aiohttp
 
+from custom_components.napoleon_bbq.const import LOGGER, _AylaRegion
+
 
 class NapoleonBBQApiClientError(Exception):
     """Base exception to indicate a general API error."""
@@ -24,18 +34,18 @@ class NapoleonBBQApiClientError(Exception):
 class NapoleonBBQApiClientCommunicationError(
     NapoleonBBQApiClientError,
 ):
-    """Exception to indicate a communication error with the API."""
+    """Exception to indicate a communication error with the Ayla cloud."""
 
 
 class NapoleonBBQApiClientAuthenticationError(
     NapoleonBBQApiClientError,
 ):
-    """Exception to indicate an authentication error with the API."""
+    """Exception to indicate an authentication error with the Ayla cloud."""
 
 
 def _verify_response_or_raise(response: aiohttp.ClientResponse) -> None:
     """
-    Verify that the API response is valid.
+    Verify that the Ayla cloud response is valid.
 
     Raises appropriate exceptions for authentication and HTTP errors.
 
@@ -43,8 +53,8 @@ def _verify_response_or_raise(response: aiohttp.ClientResponse) -> None:
         response: The aiohttp ClientResponse to verify.
 
     Raises:
-        NapoleonBBQApiClientAuthenticationError: For 401/403 errors.
-        aiohttp.ClientResponseError: For other HTTP errors.
+        NapoleonBBQApiClientAuthenticationError: For 401/403 responses.
+        aiohttp.ClientResponseError: For other HTTP error responses.
 
     """
     if response.status in (401, 403):
@@ -57,156 +67,258 @@ def _verify_response_or_raise(response: aiohttp.ClientResponse) -> None:
 
 class NapoleonBBQApiClient:
     """
-    API Client for Smart Air Purifier integration.
+    Ayla cloud HTTP client for the napoleon_bbq integration.
 
-    This client demonstrates authentication and API communication patterns
-    for Home Assistant integrations. It handles HTTP requests, error handling,
-    and credential management.
+    Used once at config flow setup time to authenticate the user with the Ayla
+    IoT cloud, discover their Napoleon Prestige grill(s), and fetch the per-device
+    BLE local key. After setup, the local key is persisted in the config entry
+    and the cloud API is no longer needed.
 
-    The username and password are stored and would be used for:
-    - HTTP Basic Auth headers
-    - OAuth token exchange
-    - API key generation
-    - Session token management
+    The sign-in flow is a two-step process:
+    1. POST to the Ayla user API with Napoleon app credentials and the user's
+       Napoleon account email and password to obtain an access token.
+    2. GET the device connection config from the Ayla device API using the
+       device DSN to obtain the local_key.
 
-    Note: JSONPlaceholder is used as a demo endpoint and doesn't require auth.
-    In production, replace with your actual API endpoint that validates credentials.
-
-    For more information on API clients:
-    https://developers.home-assistant.io/docs/api_lib_index
+    For more information on the Ayla cloud API:
+    See _handover/CLAUDE.md — Cloud API section.
 
     Attributes:
-        _username: The username for API authentication.
-        _password: The password for API authentication.
-        _session: The aiohttp ClientSession for making requests.
+        _region: The Ayla region configuration (endpoints and app credentials).
+        _session: The shared aiohttp ClientSession from Home Assistant.
 
     """
 
     def __init__(
         self,
-        username: str,
-        password: str,
+        region: _AylaRegion,
         session: aiohttp.ClientSession,
     ) -> None:
         """
-        Initialize the API Client with credentials.
+        Initialise the Ayla cloud API client for a specific region.
 
         Args:
-            username: The username for authentication from config flow.
-            password: The password for authentication from config flow.
-            session: The aiohttp ClientSession to use for requests.
+            region: The Ayla region configuration (_AylaRegion named tuple)
+                containing API hostnames, app credentials, and OEM model filter.
+            session: The aiohttp ClientSession to use for requests (provided
+                by Home Assistant via async_get_clientsession).
 
         """
-        self._username = username
-        self._password = password
+        self._region = region
         self._session = session
 
-    async def async_get_data(self) -> Any:
+    async def async_get_local_key(
+        self,
+        username: str,
+        password: str,
+        dsn: str | None = None,
+    ) -> tuple[str, str]:
         """
-        Get data from the API.
+        Sign in to the Ayla cloud and return the DSN and local key for a Napoleon grill.
 
-        This method fetches the current state and sensor data from the device.
-        It demonstrates where credentials would be used in production:
-        - Authorization headers (Basic Auth, Bearer Token)
-        - Query parameters (username, api_key)
-        - Session cookies (after login)
-
-        Returns:
-            A dictionary containing the device data.
-
-        Raises:
-            NapoleonBBQApiClientAuthenticationError: If authentication fails.
-            NapoleonBBQApiClientCommunicationError: If communication fails.
-            NapoleonBBQApiClientError: For other API errors.
-
-        """
-        # In production: Use username/password for authentication
-        # Example patterns:
-        # 1. Basic Auth: auth=aiohttp.BasicAuth(self._username, self._password)
-        # 2. Token: headers={"Authorization": f"Bearer {self._get_token()}"}
-        # 3. API Key: params={"username": self._username, "key": self._password}
-
-        return await self._api_wrapper(
-            method="get",
-            url="https://jsonplaceholder.typicode.com/posts/1",
-            # For demo purposes with JSONPlaceholder (no auth required)
-            # In production, add authentication here
-        )
-
-    async def async_set_fan_speed(self, speed: str) -> Any:
-        """
-        Set the fan speed on the device.
+        If a DSN is provided the local key is fetched for that specific device.
+        Otherwise, the user's device list is queried and the first Napoleon Prestige
+        grill matching the region's OEM model is used.
 
         Args:
-            speed: The fan speed to set (low, medium, high, auto).
+            username: Napoleon app account email address.
+            password: Napoleon app account password.
+            dsn: Optional device serial number. Auto-discovered from the Ayla
+                device list when not provided.
 
         Returns:
-            A dictionary containing the API response.
+            A tuple of ``(dsn, local_key)`` where ``dsn`` is the Ayla device serial
+            number and ``local_key`` is the base64-encoded BLE authentication key.
 
         Raises:
-            NapoleonBBQApiClientAuthenticationError: If authentication fails.
-            NapoleonBBQApiClientCommunicationError: If communication fails.
-            NapoleonBBQApiClientError: For other API errors.
+            NapoleonBBQApiClientAuthenticationError: If sign-in fails due to invalid
+                credentials (HTTP 401/403).
+            NapoleonBBQApiClientCommunicationError: If a network or timeout error
+                occurs while contacting the Ayla cloud.
+            NapoleonBBQApiClientError: If no Napoleon Prestige grill is found in the
+                user's Ayla account.
 
         """
-        # In production: Send authenticated request to change fan speed
-        return await self._api_wrapper(
-            method="patch",
-            url="https://jsonplaceholder.typicode.com/posts/1",
-            data={"fan_speed": speed, "user": self._username},
-            headers={"Content-type": "application/json; charset=UTF-8"},
-        )
+        access_token = await self._async_sign_in(username, password)
+        if dsn is None:
+            devices = await self._async_list_devices(access_token)
+            if not devices:
+                msg = f"No Napoleon Prestige grill found in Ayla account (expected OEM model '{self._region.prestige_oem_model}')"
+                raise NapoleonBBQApiClientError(msg)
+            dsn = devices[0][0]
+        local_key = await self._async_fetch_local_key(access_token, dsn)
+        return dsn, local_key
 
-    async def async_set_target_humidity(self, humidity: int) -> Any:
+    async def async_list_devices(
+        self,
+        username: str,
+        password: str,
+    ) -> list[tuple[str, str]]:
         """
-        Set the target humidity on the device.
+        Sign in and return all Napoleon grills in the account matching this region.
 
         Args:
-            humidity: The target humidity percentage (30-80).
+            username: Napoleon app account email address.
+            password: Napoleon app account password.
 
         Returns:
-            A dictionary containing the API response.
+            A list of ``(dsn, display_name)`` tuples for every matching grill found.
+            Returns an empty list if the account has no matching devices.
 
         Raises:
-            NapoleonBBQApiClientAuthenticationError: If authentication fails.
-            NapoleonBBQApiClientCommunicationError: If communication fails.
-            NapoleonBBQApiClientError: For other API errors.
+            NapoleonBBQApiClientAuthenticationError: If sign-in fails.
+            NapoleonBBQApiClientCommunicationError: On network errors.
 
         """
-        # In production: Send authenticated request to change humidity setting
-        return await self._api_wrapper(
-            method="patch",
-            url="https://jsonplaceholder.typicode.com/posts/1",
-            data={"target_humidity": humidity, "user": self._username},
-            headers={"Content-type": "application/json; charset=UTF-8"},
-        )
+        access_token = await self._async_sign_in(username, password)
+        return await self._async_list_devices(access_token)
+
+    async def async_refresh_local_keys(
+        self,
+        username: str,
+        password: str,
+        dsns: list[str],
+    ) -> list[str]:
+        """
+        Sign in once and fetch fresh local keys for the given list of DSNs.
+
+        Used during reauthentication to refresh all sub-entries in a single
+        sign-in round-trip.
+
+        Args:
+            username: Napoleon app account email address.
+            password: Napoleon app account password.
+            dsns: List of Ayla device serial numbers to refresh.
+
+        Returns:
+            A list of local key strings in the same order as ``dsns``.
+
+        Raises:
+            NapoleonBBQApiClientAuthenticationError: If sign-in fails.
+            NapoleonBBQApiClientCommunicationError: On network errors.
+
+        """
+        access_token = await self._async_sign_in(username, password)
+        return list(await asyncio.gather(*[self._async_fetch_local_key(access_token, dsn) for dsn in dsns]))
+
+    async def _async_sign_in(self, username: str, password: str) -> str:
+        """
+        Authenticate with the Ayla user API and return an access token.
+
+        Posts to ``/users/sign_in.json`` with the Napoleon application credentials
+        and the user's account email and password.
+
+        Args:
+            username: Napoleon app account email address.
+            password: Napoleon app account password.
+
+        Returns:
+            The Ayla access token string.
+
+        Raises:
+            NapoleonBBQApiClientAuthenticationError: On 401/403 responses.
+            NapoleonBBQApiClientCommunicationError: On network errors or timeouts.
+
+        """
+        url = f"https://{self._region.user_host}/users/sign_in.json"
+        body: dict[str, Any] = {
+            "user": {
+                "email": username,
+                "password": password,
+                "application": {
+                    "app_id": self._region.app_id,
+                    "app_secret": self._region.app_secret,
+                },
+            }
+        }
+        data = await self._api_wrapper(method="post", url=url, json=body)
+        access_token: str = data["access_token"]
+        return access_token
+
+    async def _async_list_devices(self, access_token: str) -> list[tuple[str, str]]:
+        """
+        List all Napoleon Prestige grills in the account and return their DSN and name.
+
+        Queries ``/apiv1/devices.json`` and filters by the OEM model string defined
+        in the region configuration.
+
+        Args:
+            access_token: A valid Ayla access token from ``_async_sign_in``.
+
+        Returns:
+            A list of ``(dsn, display_name)`` tuples for each matching grill.
+
+        Raises:
+            NapoleonBBQApiClientCommunicationError: On network errors.
+
+        """
+        url = f"https://{self._region.device_host}/apiv1/devices.json"
+        headers = {"Authorization": f"auth_token {access_token}"}
+        data = await self._api_wrapper(method="get", url=url, headers=headers)
+
+        prestige_model = self._region.prestige_oem_model
+        devices: list[tuple[str, str]] = []
+        for entry in data:
+            device = entry.get("device", {})
+            if device.get("oem_model") == prestige_model:
+                dsn: str = device["dsn"]
+                name: str = device.get("friendly_name") or device.get("product_name") or dsn
+                LOGGER.debug("Found Napoleon Prestige grill: DSN=%s name=%r", dsn, name)
+                devices.append((dsn, name))
+        return devices
+
+    async def _async_fetch_local_key(self, access_token: str, dsn: str) -> str:
+        """
+        Fetch the BLE local key for a specific Ayla device DSN.
+
+        Queries ``/apiv1/devices/{dsn}/connection_config.json`` and returns the
+        ``data.local_key`` field from the response.
+
+        Args:
+            access_token: A valid Ayla access token from ``_async_sign_in``.
+            dsn: The Ayla device serial number.
+
+        Returns:
+            The base64-encoded local key string used for BLE authentication.
+
+        Raises:
+            NapoleonBBQApiClientAuthenticationError: On 401/403 responses.
+            NapoleonBBQApiClientCommunicationError: On network errors or timeouts.
+
+        """
+        url = f"https://{self._region.device_host}/apiv1/devices/{dsn}/connection_config.json"
+        headers = {"Authorization": f"auth_token {access_token}"}
+        data = await self._api_wrapper(method="get", url=url, headers=headers)
+        local_key: str = data["local_key"]
+        return local_key
 
     async def _api_wrapper(
         self,
         method: str,
         url: str,
-        data: dict | None = None,
-        headers: dict | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
     ) -> Any:
         """
-        Wrapper for API requests with error handling.
+        Wrapper for Ayla cloud HTTP requests with standardised error handling.
 
-        This method handles all HTTP requests and translates exceptions
-        into integration-specific exceptions.
+        All HTTP communication passes through this method, which maps network
+        and HTTP errors to the integration's exception hierarchy.
 
         Args:
-            method: The HTTP method (get, post, patch, etc.).
-            url: The URL to request.
-            data: Optional data to send in the request body.
-            headers: Optional headers to include in the request.
+            method: The HTTP method string (``"get"``, ``"post"``, etc.).
+            url: The full request URL.
+            headers: Optional additional request headers.
+            json: Optional JSON-serialisable body dict (sent as ``application/json``).
 
         Returns:
-            The JSON response from the API.
+            The parsed JSON response body as a dict or list.
 
         Raises:
-            NapoleonBBQApiClientAuthenticationError: If authentication fails.
-            NapoleonBBQApiClientCommunicationError: If communication fails.
-            NapoleonBBQApiClientError: For other API errors.
+            NapoleonBBQApiClientAuthenticationError: For HTTP 401/403 responses.
+            NapoleonBBQApiClientCommunicationError: For network errors, DNS failures,
+                or request timeouts.
+            NapoleonBBQApiClientError: For any other unexpected exception.
 
         """
         try:
@@ -215,7 +327,7 @@ class NapoleonBBQApiClient:
                     method=method,
                     url=url,
                     headers=headers,
-                    json=data,
+                    json=json,
                 )
                 _verify_response_or_raise(response)
                 return await response.json()
@@ -230,6 +342,8 @@ class NapoleonBBQApiClient:
             raise NapoleonBBQApiClientCommunicationError(
                 msg,
             ) from exception
+        except NapoleonBBQApiClientError:
+            raise
         except Exception as exception:
             msg = f"Something really wrong happened! - {exception}"
             raise NapoleonBBQApiClientError(

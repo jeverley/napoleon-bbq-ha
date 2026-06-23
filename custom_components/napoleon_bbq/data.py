@@ -1,37 +1,167 @@
 """
-Custom types for napoleon_bbq.
+Custom types and data models for napoleon_bbq.
 
-This module defines the runtime data structure attached to each config entry.
-Access pattern: entry.runtime_data.client / entry.runtime_data.coordinator
+This module defines:
+- NapoleonBBQGrillState: live device state updated by the coordinator from BLE pushes/polls
+- NapoleonBBQCoordinators: type alias for the runtime_data dict keyed by sub-entry ID
+- NapoleonBBQConfigEntry: type alias for type-safe access to the config entry
 
-The NapoleonBBQConfigEntry type alias is used throughout the integration
-for type-safe access to the config entry's runtime data.
+Access pattern: entry.runtime_data[subentry_id]
+Coordinator data: coordinator.data (a NapoleonBBQGrillState instance)
+
+For more information:
+https://developers.home-assistant.io/docs/config_entries_index
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from custom_components.napoleon_bbq.const import (
+    PROBE_DISCONNECTED,
+    PROP_AUTO_T_OUT,
+    PROP_BATTERY_LOW_ALERT,
+    PROP_BRT_LVL,
+    PROP_BSMODE,
+    PROP_BT_LVL,
+    PROP_GS_UNT,
+    PROP_LCD_OFF,
+    PROP_PRB_STAT,
+    PROP_PRB_TEMPS,
+    PROP_TGT_TEMPS,
+    PROP_TNK_WT,
+    PROP_TUNIT,
+    PROP_VERSION,
+)
 
 if TYPE_CHECKING:
+    from custom_components.napoleon_bbq.coordinator import NapoleonBBQDataUpdateCoordinator
     from homeassistant.config_entries import ConfigEntry
-    from homeassistant.loader import Integration
 
-    from .api import NapoleonBBQApiClient
-    from .coordinator import NapoleonBBQDataUpdateCoordinator
-
-
-type NapoleonBBQConfigEntry = ConfigEntry[NapoleonBBQData]
+type NapoleonBBQCoordinators = dict[str, "NapoleonBBQDataUpdateCoordinator"]
+type NapoleonBBQConfigEntry = ConfigEntry[NapoleonBBQCoordinators]
 
 
 @dataclass
-class NapoleonBBQData:
-    """Runtime data for napoleon_bbq config entries.
+class NapoleonBBQGrillState:
+    """Snapshot of all polled grill properties.
 
-    Stored as entry.runtime_data after successful setup.
-    Provides typed access to the API client and coordinator instances.
+    Updated by the coordinator from incoming Ayla BLE protocol messages:
+    - Odp (unsolicited push): state changes the grill sends proactively.
+    - gpr (response to Gpr poll): current value for a specific property.
+
+    Temperature values are in the unit indicated by tunit (0=°C, 1=°F).
+
+    Attributes:
+        tunit: Temperature unit — 0 = Celsius, 1 = Fahrenheit.
+        bsmode: Battery/screen saver mode enabled state.
+        lcd_off: Knob backlights off state — True = off.
+        brt_lvl: Knob backlight brightness level (0=low, 1=medium, 2=high). None if not yet polled.
+        auto_t_out: Auto shutoff timeout in hours (1–24). None if not yet polled.
+        gs_unt: Gas unit — 0 = kg, 1 = lbs.
+        probe_temps: Current probe temperatures keyed by probe number (1–4). None = not yet received.
+        probe_stat: Probe connected state bitmask (bit 0 = probe 1, bit 3 = probe 4).
+        target_temps: Target temperatures keyed by probe number (1–4). None = not yet received.
+        battery_level: Battery level percentage. None if not yet polled.
+        battery_low: True if the battery low alert is active.
+        tank_weight: Current gas tank weight in gs_unt units. None if not configured or not yet polled.
+        firmware_version: Grill firmware version string. None if not yet polled.
+
     """
 
-    client: NapoleonBBQApiClient
-    coordinator: NapoleonBBQDataUpdateCoordinator
-    integration: Integration
+    # Settings
+    tunit: int = 0
+    bsmode: bool = False
+    lcd_off: bool = False
+    brt_lvl: int | None = None
+    auto_t_out: int | None = None
+    gs_unt: int = 0
+
+    # Probe temperatures (°C or °F per tunit; None = not yet received)
+    probe_temps: dict[int, float | None] = field(default_factory=lambda: {1: None, 2: None, 3: None, 4: None})
+
+    # Probe connected state bitmask (bit 0 = probe 1, …, bit 3 = probe 4)
+    probe_stat: int = 0
+
+    # Target temperatures per probe (None = not yet received)
+    target_temps: dict[int, float | None] = field(default_factory=lambda: {1: None, 2: None, 3: None, 4: None})
+
+    # System
+    battery_level: int | None = None
+    battery_low: bool = False
+    tank_weight: float | None = None
+    firmware_version: str | None = None
+
+    def probe_connected(self, probe: int) -> bool:
+        """Return True if the given probe (1-indexed) is connected.
+
+        Args:
+            probe: Probe number (1–4).
+
+        Returns:
+            True if the corresponding bit in probe_stat is set.
+
+        """
+        return bool(self.probe_stat & (1 << (probe - 1)))
+
+    def probe_temp(self, probe: int) -> float | None:
+        """Return the current temperature for a probe, or None if unavailable.
+
+        Returns None when the probe is not connected (per probe_stat), the value
+        has not yet been received from the grill, or the value equals the
+        disconnected sentinel (4095).
+
+        Args:
+            probe: Probe number (1–4).
+
+        Returns:
+            The temperature in the unit indicated by tunit, or None.
+
+        """
+        if not self.probe_connected(probe):
+            return None
+        val = self.probe_temps.get(probe)
+        if val is None or val >= PROBE_DISCONNECTED:
+            return None
+        return val
+
+    def update_from_property(self, name: str, value: Any) -> None:
+        """Apply a single Ayla property value received from the grill.
+
+        Called by the coordinator for each incoming gpr response or Odp push.
+
+        Args:
+            name: The Ayla property name (e.g. "TUNIT", "PRB_TMP_ONE").
+            value: The raw property value from the protocol message.
+
+        """
+        if name == PROP_TUNIT:
+            self.tunit = int(value)
+        elif name == PROP_BSMODE:
+            self.bsmode = bool(value)
+        elif name == PROP_LCD_OFF:
+            self.lcd_off = bool(value)
+        elif name == PROP_BRT_LVL:
+            self.brt_lvl = int(value)
+        elif name == PROP_AUTO_T_OUT:
+            self.auto_t_out = int(value)
+        elif name == PROP_GS_UNT:
+            self.gs_unt = int(value)
+        elif name == PROP_PRB_STAT:
+            self.probe_stat = int(value)
+        elif name == PROP_BT_LVL:
+            self.battery_level = int(value)
+        elif name == PROP_BATTERY_LOW_ALERT:
+            self.battery_low = bool(value)
+        elif name == PROP_TNK_WT:
+            # -14400 is the sentinel value indicating the gas tank has not been configured.
+            self.tank_weight = float(value) if value != -14400 else None
+        elif name == PROP_VERSION:
+            self.firmware_version = str(value)
+        elif name in PROP_PRB_TEMPS:
+            probe = PROP_PRB_TEMPS.index(name) + 1
+            self.probe_temps[probe] = float(value)
+        elif name in PROP_TGT_TEMPS:
+            probe = PROP_TGT_TEMPS.index(name) + 1
+            self.target_temps[probe] = float(value)

@@ -1,5 +1,4 @@
-"""
-Config flow for napoleon_bbq.
+"""Config flow for napoleon_bbq.
 
 This module provides backwards compatibility for hassfest.
 The actual implementation is in the config_flow_handler package.

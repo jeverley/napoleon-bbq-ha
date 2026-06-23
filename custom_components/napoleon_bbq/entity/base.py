@@ -2,20 +2,26 @@
 Base entity class for napoleon_bbq.
 
 This module provides the base entity class that all integration entities inherit from.
-It handles common functionality like device info, unique IDs, and coordinator integration.
+It handles common functionality such as coordinator integration, device info, unique ID
+generation, and entity naming conventions.
+
+All platform entities must inherit using the pattern:
+    ``class MyEntity(PlatformEntity, NapoleonBBQEntity)``
+
+MRO order matters — the platform-specific class must come first.
 
 For more information on entities:
 https://developers.home-assistant.io/docs/core/entity
-https://developers.home-assistant.io/docs/core/entity/index/#common-properties
+https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-single-api-poll-for-data-for-all-entities
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from custom_components.napoleon_bbq.const import ATTRIBUTION
+from custom_components.napoleon_bbq.const import ATTRIBUTION, CONF_MAC
 from custom_components.napoleon_bbq.coordinator import NapoleonBBQDataUpdateCoordinator
-from homeassistant.helpers.device_registry import DeviceInfo
+from custom_components.napoleon_bbq.entity_utils.device_info import build_device_info
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 if TYPE_CHECKING:
@@ -27,14 +33,17 @@ class NapoleonBBQEntity(CoordinatorEntity[NapoleonBBQDataUpdateCoordinator]):
     Base entity class for napoleon_bbq.
 
     All entities in this integration inherit from this class, which provides:
-    - Automatic coordinator updates
-    - Device info management
-    - Unique ID generation
-    - Attribution and naming conventions
+    - Automatic coordinator updates via ``CoordinatorEntity``.
+    - Device info registered against the grill's MAC address.
+    - Unique ID generation from ``{mac_lowercase}_{description.key}``.
+    - Attribution and HA entity naming via ``_attr_has_entity_name = True``.
+
+    Platform entities must set their own ``native_value``, ``is_on``, or other
+    platform-required properties. They must not call the API client directly.
 
     For more information:
     https://developers.home-assistant.io/docs/core/entity
-    https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-single-api-poll-for-data-for-all-entities
+
     """
 
     _attr_attribution = ATTRIBUTION
@@ -46,25 +55,20 @@ class NapoleonBBQEntity(CoordinatorEntity[NapoleonBBQDataUpdateCoordinator]):
         entity_description: EntityDescription,
     ) -> None:
         """
-        Initialize the base entity.
+        Initialise the base entity.
 
         Args:
-            coordinator: The data update coordinator for this entity.
-            entity_description: The entity description defining characteristics.
+            coordinator: The BLE coordinator managing state for this config entry.
+            entity_description: The entity description defining static entity metadata
+                (key, name, device class, unit of measurement, etc.).
 
         """
         super().__init__(coordinator)
         self.entity_description = entity_description
-        # Include entity description key in unique_id to support multiple entities
-        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{entity_description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={
-                (
-                    coordinator.config_entry.domain,
-                    coordinator.config_entry.entry_id,
-                ),
-            },
-            name=coordinator.config_entry.title,
-            manufacturer=coordinator.config_entry.domain,
-            model=coordinator.data.get("model", "Unknown"),
-        )
+        self._attr_unique_id = f"{coordinator.subentry.data[CONF_MAC].lower()}_{entity_description.key}"
+        self._attr_device_info = build_device_info(coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return True when the grill BLE session is authenticated."""
+        return self.coordinator.authenticated
