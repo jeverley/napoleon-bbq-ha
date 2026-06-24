@@ -7,265 +7,96 @@
 [![hacs][hacsbadge]][hacs]
 ![Project Maintenance][maintenance-shield]
 
-<!--
-Uncomment and customize these badges if you want to use them:
+A Home Assistant integration for **Napoleon Prestige grills**, providing direct local Bluetooth control. Uses your Napoleon app account credentials once at setup to retrieve the per-device BLE local key, then communicates directly with the grill over Bluetooth — no cloud dependency during normal operation.
 
-[![BuyMeCoffee][buymecoffeebadge]][buymecoffee]
-[![Discord][discord-shield]][discord]
--->
+## Features
 
-**✨ Develop in the cloud:** Want to contribute or customize this integration? Open it directly in GitHub Codespaces - no local setup required!
+- **Bluetooth auto-discovery** — grills advertising as `Prestige-*` are detected automatically
+- **Multiple grills** — add as many grills as you like under a single account
+- **Probe temperatures** — monitor up to four meat probes with configurable target temperatures
+- **Gas tank weight** — track remaining gas level
+- **Grill controls** — knob backlight, display power save, temperature and gas units
+- **Turn off** — remotely turn off the grill from Home Assistant
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jeverley/napoleon-bbq-ha?quickstart=1)
+## Entities
 
-## ✨ Features
+Each configured grill exposes the following entities:
 
-- **Easy Setup**: Simple configuration through the UI - no YAML required
-- **Air Quality Monitoring**: Track AQI and PM2.5 levels in real-time
-- **Filter Management**: Monitor filter life and get replacement alerts
-- **Smart Control**: Adjust fan speed, target humidity, and operating modes
-- **Child Lock**: Safety feature to prevent accidental changes
-- **Diagnostic Info**: View filter life, runtime hours, and device statistics
-- **Reconfigurable**: Change credentials anytime without removing the integration
-- **Options Flow**: Adjust settings like update interval after setup
-- **Custom Services**: Advanced control with built-in service calls
+| Platform        | Entity                | Description                             |
+| --------------- | --------------------- | --------------------------------------- |
+| `binary_sensor` | Connected             | Whether the grill is reachable over BLE |
+| `sensor`        | Probe 1–4 temperature | Live meat probe readings                |
+| `sensor`        | Battery level         | Controller battery level                |
+| `sensor`        | Gas tank weight       | Remaining gas (kg or lbs)               |
+| `sensor`        | Firmware version      | Grill firmware (diagnostic)             |
+| `number`        | Probe 1–4 target temp | Alert threshold per probe               |
+| `light`         | Knob backlight        | Illuminated knob ring brightness        |
+| `switch`        | Display power save    | Auto-dim the grill display              |
+| `select`        | Temperature unit      | Celsius or Fahrenheit                   |
+| `select`        | Gas unit              | Kilograms or Pounds                     |
+| `button`        | Turn off grill        | Remotely turn off the grill             |
 
-**This integration will set up the following platforms.**
+## Requirements
 
-| Platform        | Description                                              |
-| --------------- | -------------------------------------------------------- |
-| `sensor`        | Air quality index (AQI), PM2.5, filter life, and runtime |
-| `binary_sensor` | API connection status and filter replacement alert       |
-| `switch`        | Child lock and LED display controls                      |
-| `select`        | Fan speed selection (Low/Medium/High/Auto)               |
-| `number`        | Target humidity setting (30-80%)                         |
-| `button`        | Reset filter timer after replacement                     |
-| `fan`           | Air purifier fan control with speed settings             |
+- [HACS](https://hacs.xyz/) installed in Home Assistant
+- A Napoleon app account with your Prestige grill registered
+- A Bluetooth adapter reachable by Home Assistant (built-in or USB)
 
-> [!TIP]
-> **Interactive Demo:** The entities are interconnected for demonstration.
-> Press the **Reset Filter Timer** button to see **Filter Life Remaining** update to 100%.
-> Changing the **Air Purifier** fan speed syncs the **Fan Speed** select, and vice versa.
-
-## 🚀 Quick Start
-
-### Step 1: Install the Integration
-
-**Prerequisites:** This integration requires [HACS](https://hacs.xyz/) (Home Assistant Community Store) to be installed.
+## Installation
 
 Click the button below to open the integration directly in HACS:
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jpawlowski&repository=napoleon-bbq-ha&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jeverley&repository=napoleon-bbq-ha&category=integration)
 
-Then:
-
-1. Click "Download" to install the integration
-2. **Restart Home Assistant** (required after installation)
-
-> [!NOTE]
-> The My Home Assistant redirect will first take you to a landing page. Click the button there to open your Home Assistant instance.
+Then click **Download** and **restart Home Assistant**.
 
 <details>
-<summary><strong>Manual Installation (Advanced)</strong></summary>
-
-If you prefer not to use HACS:
+<summary><strong>Manual installation</strong></summary>
 
 1. Download the `custom_components/napoleon_home/` folder from this repository
-2. Copy it to your Home Assistant's `custom_components/` directory
+2. Copy it to your Home Assistant `custom_components/` directory
 3. Restart Home Assistant
 
 </details>
 
-### Step 2: Add and Configure the Integration
+## Setup
 
-**Important:** You must have installed the integration first (see Step 1) and restarted Home Assistant!
-
-#### Option 1: One-Click Setup (Quick)
-
-Click the button below to open the configuration dialog:
+If your grill is powered on and in range, Home Assistant will discover it automatically and prompt you to set it up. You can also add it manually:
 
 [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=napoleon_home)
 
-Follow the setup wizard:
+Or go to **Settings → Devices & Services → Add Integration** and search for **Napoleon Home**.
 
-1. Enter your username
-2. Enter your password
-3. Click Submit
+### During setup you will need
 
-That's it! The integration will start loading your data.
+| Field             | Description                                                         |
+| ----------------- | ------------------------------------------------------------------- |
+| Email             | Your Napoleon app email address                                     |
+| Password          | Your Napoleon app password                                          |
+| Region            | The region your account is registered in                            |
+| Grill MAC address | Bluetooth MAC address of the grill — leave blank if auto-discovered |
 
-#### Option 2: Manual Configuration
+If your account has multiple grills, you will be prompted to select which one to configure. Additional grills can be added afterwards via **Add grill** on the integration page.
 
-1. Go to **Settings** → **Devices & Services**
-2. Click **"+ Add Integration"**
-3. Search for "Napoleon Home"
-4. Follow the same setup steps as Option 1
+### Options
 
-### Step 3: Adjust Settings (Optional)
+After setup, click **Configure** on the integration to adjust:
 
-After setup, you can adjust options:
-
-1. Go to **Settings** → **Devices & Services**
-2. Find **Napoleon Home**
-3. Click **Configure** to adjust:
-   - Update interval (how often to refresh data)
-   - Enable debug logging
-
-You can also **Reconfigure** your credentials anytime without removing the integration.
-
-### Step 4: Start Using!
-
-The integration creates several entities for your air purifier:
-
-- **Sensors**: Air quality index, PM2.5 levels, filter life remaining, total runtime
-- **Binary Sensors**: API connection status, filter replacement alert
-- **Switches**: Child lock, LED display control
-- **Select**: Fan speed (Low/Medium/High/Auto)
-- **Number**: Target humidity (30-80%)
-- **Button**: Reset filter timer
-- **Fan**: Air purifier fan control
-
-Find all entities in **Settings** → **Devices & Services** → **Napoleon Home** → click on the device.
-
-## Available Entities
-
-### Sensors
-
-- **Air Quality Index (AQI)**: Real-time air quality measurement (0-500 scale)
-  - Includes air quality category (Good/Moderate/Unhealthy/etc.)
-  - Health recommendations based on current AQI
-- **PM2.5**: Fine particulate matter concentration in µg/m³
-- **Filter Life Remaining** (Diagnostic): Shows remaining filter life as percentage
-- **Total Runtime** (Diagnostic): Total operating hours of the device
-
-### Binary Sensors
-
-- **API Connection**: Shows whether the connection to the API is active
-  - On: Connected and receiving data
-  - Off: Connection lost or authentication failed
-  - Shows update interval and API endpoint information
-- **Filter Replacement Needed**: Alerts when filter needs replacement
-  - Shows estimated days remaining
-  - Turns on when filter life is low
-
-### Switches
-
-- **Child Lock**: Prevents accidental button presses on the device
-  - Icon changes based on state (locked/unlocked)
-- **LED Display**: Enable/disable the LED display
-  - Disabled by default - enable in entity settings if needed
-
-### Select
-
-- **Fan Speed**: Choose from Low, Medium, High, or Auto
-  - Icon changes dynamically based on selected speed
-  - Auto mode adjusts speed based on air quality
-  - Syncs bidirectionally with the Air Purifier fan entity
-
-### Number
-
-- **Target Humidity**: Set desired humidity level (30-80%)
-  - Adjustable in 5% increments
-  - Displayed as a slider in the UI
-
-### Button
-
-- **Reset Filter Timer**: Reset the filter life to 100%
-  - Press to reset after replacing the filter
-  - Instantly updates the Filter Life Remaining sensor
-
-### Fan
-
-- **Air Purifier**: Control the air purifier fan speed and power
-  - Three speed levels: Low, Medium, High
-  - Syncs bidirectionally with the Fan Speed select entity
-  - Turn on/off functionality
-
-## Custom Services
-
-The integration provides services for advanced automation:
-
-### `napoleon_home.example_action`
-
-Perform a custom action (customize this for your needs).
-
-**Example:**
-
-```yaml
-service: napoleon_home.example_action
-data:
-  # Add your parameters here
-```
-
-### `napoleon_home.reload_data`
-
-Manually refresh data from the API without waiting for the update interval.
-
-**Example:**
-
-```yaml
-service: napoleon_home.reload_data
-```
-
-Use these services in automations or scripts for more control.
-
-## Configuration Options
-
-### During Setup
-
-| Name     | Required | Description           |
-| -------- | -------- | --------------------- |
-| Username | Yes      | Your account username |
-| Password | Yes      | Your account password |
-
-### After Setup (Options)
-
-You can change these anytime by clicking **Configure**:
-
-| Name             | Default | Description                |
-| ---------------- | ------- | -------------------------- |
-| Update Interval  | 1 hour  | How often to refresh data  |
-| Enable Debugging | Off     | Enable extra debug logging |
+| Option        | Default | Description                                 |
+| ------------- | ------- | ------------------------------------------- |
+| Poll interval | 30 s    | How often to request a full property update |
 
 ## Troubleshooting
 
-### Authentication Issues
+### Grill not discovered automatically
 
-#### Reauthentication
+Ensure the grill is powered on and within Bluetooth range of your Home Assistant host. You can add it manually using the **Grill MAC address** field during setup — the MAC is usually printed on a label on the grill controller.
 
-If your credentials expire or change, Home Assistant will automatically prompt you to reauthenticate:
+### Reauthentication
 
-1. Go to **Settings** → **Devices & Services**
-2. Look for **"Action Required"** or **"Configuration Required"** message on the integration
-3. Click **"Reconfigure"** or follow the prompt
-4. Enter your updated credentials
-5. Click Submit
+If the grill's local key expires, Home Assistant will prompt for your Napoleon app credentials. Go to **Settings → Devices & Services → Napoleon Home → Reconfigure** to re-enter them.
 
-The integration will automatically resume normal operation with the new credentials.
-
-#### Manual Credential Update
-
-You can also update credentials at any time without waiting for an error:
-
-1. Go to **Settings** → **Devices & Services**
-2. Find **Napoleon Home**
-3. Click the **3 dots menu** → **Reconfigure**
-4. Enter new username/password
-5. Click Submit
-
-#### Connection Status
-
-Monitor your connection status with the **API Connection** binary sensor:
-
-- **On** (Connected): Integration is receiving data normally
-- **Off** (Disconnected): Connection lost or authentication failed
-  - Check the binary sensor attributes for diagnostic information
-  - Verify credentials if authentication failed
-  - Check network connectivity
-
-### Enable Debug Logging
-
-To enable debug logging for this integration, add the following to your `configuration.yaml`:
+### Enable debug logging
 
 ```yaml
 logger:
@@ -274,124 +105,51 @@ logger:
     custom_components.napoleon_home: debug
 ```
 
-### Common Issues
-
-#### Authentication Errors
-
-If you receive authentication errors:
-
-1. Verify your username and password are correct
-2. Check that your account has the necessary permissions
-3. Wait for the automatic reauthentication prompt, or manually reconfigure
-4. Check the API Connection binary sensor for status
-
-#### Device Not Responding
-
-If your device is not responding:
-
-1. Check the **API Connection** binary sensor - it should be "On"
-2. Check your network connection
-3. Verify the device is powered on
-4. Check the integration diagnostics (Settings → Devices & Services → Napoleon Home → 3 dots → Download diagnostics)
-
 ## 🤝 Contributing
 
-Contributions are welcome! Please open an issue or pull request if you have suggestions or improvements.
+Contributions are welcome! Please open an issue or pull request.
 
-You have two options to set up a development environment — expand below for full details.
+**✨ Develop in the cloud:** Open this repository directly in GitHub Codespaces — no local setup required.
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jeverley/napoleon-bbq-ha?quickstart=1)
 
 <details>
-<summary><strong>Development Setup</strong></summary>
+<summary><strong>Local development setup</strong></summary>
 
 Both options provide the same fully-configured environment with Home Assistant, Python 3.14, Node.js LTS, and all necessary tools.
 
-### Option 1: GitHub Codespaces (Recommended) ☁️
-
-Develop directly in your browser without installing anything locally!
+### Option 1: GitHub Codespaces ☁️
 
 1. Click the green **"Code"** button in this repository
 2. Switch to the **"Codespaces"** tab
 3. Click **"Create codespace on main"**
-4. **Wait for setup** (2-3 minutes first time) — everything installs automatically
-5. **Review and commit** your changes in the Source Control panel (`Ctrl+Shift+G`)
+4. Wait for setup (2–3 minutes first time)
 
-> [!TIP]
-> Codespaces gives you **60 hours/month free** for personal accounts. When you start Home Assistant (`script/develop`), port 8123 forwards automatically.
+### Option 2: VS Code Dev Container 💻
 
-### Option 2: Local Development with VS Code 💻
+**Prerequisites:** Docker and the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) VS Code extension.
 
-#### Prerequisites
+- **🍎 macOS / 🐧 Linux:** Clone the repo, open in VS Code, click **"Reopen in Container"**
+- **🪟 Windows:** `F1` → **"Dev Containers: Clone Repository in Named Container Volume..."**
 
-You'll need these installed locally:
+Once inside the container:
 
-- **A Docker-compatible container engine** — see options by platform:
-
-  | Option                                                                                                                   | 🍎 macOS | 🐧 Linux | 🪟 Windows | Notes                                                                                                                                                                                                                                     |
-  | ------------------------------------------------------------------------------------------------------------------------ | :------: | :------: | :--------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | [Docker Desktop](https://www.docker.com/products/docker-desktop/)                                                        |    ✅    |    ✅    |     ✅     | **Easiest starting point for all platforms.** GUI-based, well-documented, one installer. Uses WSL2 as default backend on Windows (Hyper-V also available). Installation requires admin rights; daily use does not. Free for personal use. |
-  | [OrbStack](https://orbstack.dev/) ⭐                                                                                     |    ✅    |    —     |     —      | **Recommended for macOS** once Docker Desktop feels slow. Starts in ~2s, much lighter on RAM/CPU, full Docker API compatibility. Free for personal use.                                                                                   |
-  | [Docker CE](https://docs.docker.com/engine/install/) (native) ⭐                                                         |    —     |    ✅    |     —      | **Recommended for Linux.** Install directly via your package manager — no VM, no GUI, no overhead. Free.                                                                                                                                  |
-  | [WSL2](https://learn.microsoft.com/windows/wsl/install) + [Docker CE](https://docs.docker.com/engine/install/ubuntu/) ⭐ |    —     |    —     |     ✅     | **Recommended for Windows** once you're comfortable with WSL2. Docker runs natively inside WSL2 — no GUI overhead. Requires one-time WSL2 setup. Free.                                                                                    |
-  | [Rancher Desktop](https://rancherdesktop.io/)                                                                            |    ✅    |    ✅    |     ✅     | Open source by SUSE. GUI-based, uses WSL2 on Windows. Good alternative to Docker Desktop. Free.                                                                                                                                           |
-  | [Colima](https://github.com/abiosoft/colima)                                                                             |    ✅    |    ✅    |     —      | CLI-only, very lightweight. Good for terminal-focused workflows. Free.                                                                                                                                                                    |
-
-- **VS Code** with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
-- **Git** — macOS and Linux usually have it already; see below if not, or to get a newer version:
-  - **🍎 macOS:** The system Git (`xcode-select --install`) works fine. Recommended: `brew install git` ([Homebrew](https://brew.sh/)) for a current version.
-  - **🐧 Linux:** Usually pre-installed. If not: `sudo apt install git` (or your distro's equivalent).
-  - **🪟 Windows + WSL2 ⭐:** Install Git _inside WSL2_ with `sudo apt install git`. Git on Windows itself is not needed — VS Code clones and operates entirely within WSL2.
-  - **🪟 Windows + Docker Desktop:** Install via `winget install Git.Git` or download [Git for Windows](https://git-scm.com/download/win).
-- **Hardware** — the devcontainer runs a full Home Assistant instance including Python tooling:
-
-  |          | Minimum    | Recommended                           |
-  | -------- | ---------- | ------------------------------------- |
-  | **RAM**  | 8 GB       | 16 GB or more                         |
-  | **CPU**  | 4 cores    | 8 cores or more                       |
-  | **Disk** | 10 GB free | 20 GB free (SSD strongly recommended) |
-
-> [!TIP]
-> **Not sure which Docker option to pick?** Start with [Docker Desktop](https://www.docker.com/products/docker-desktop/) — it works on all platforms, has a GUI, and needs no extra setup. The ⭐ options are faster alternatives once you're comfortable. macOS and Linux offer the best devcontainer experience — containers run with no extra VM layer and file I/O is fast. Windows works well too; this integration uses named container volumes (files live inside WSL2, not on the Windows drive) to keep performance acceptable.
-
-> [!NOTE]
-> **New to Dev Containers?** See the [VS Code Dev Containers documentation](https://code.visualstudio.com/docs/devcontainers/containers#_system-requirements) for system requirements and how to install the extension. **Once the extension is installed, you're done** — this repository already ships a complete devcontainer configuration. You don't need to follow the rest of the VS Code guide; the setup steps below are all that's needed.
-
-#### Setup Steps
-
-1. **Clone in a Dev Container:**
-
-   **🍎 macOS / 🐧 Linux:** Clone the repository and open the folder in VS Code → click **"Reopen in Container"** when prompted (or `F1` → **"Dev Containers: Reopen in Container"**).
-
-   **🪟 Windows:** In VS Code, press `F1` → **"Dev Containers: Clone Repository in Named Container Volume..."** and enter the repository URL. This keeps files inside WSL2 for best I/O performance.
-
-2. Wait for the container to build (2-3 minutes first time)
-
-3. **Review and commit** changes in Source Control (`Ctrl+Shift+G`)
-
-4. **Start developing**:
-
-   ```bash
-   script/develop  # Home Assistant runs at http://localhost:8123
-   ```
-
-> [!NOTE]
-> Both Codespaces and local DevContainer provide the exact same experience. The only difference is where the container runs (GitHub's cloud vs. your machine).
+```bash
+script/develop  # Home Assistant at http://localhost:8123
+script/check    # Type-check, lint, spell
+script/test     # Run tests
+```
 
 </details>
 
----
-
-## 🤖 AI-Assisted Development
-
 > [!NOTE]
-> **Transparency Notice:** This integration was developed with assistance from AI coding agents (GitHub Copilot, Claude, and others). While the codebase follows Home Assistant Core standards, AI-generated code may not be reviewed or tested to the same extent as manually written code. AI tools were used to generate boilerplate code, implement standard integration features (config flow, coordinator, entities), ensure code quality and type safety, and write documentation. If you encounter unexpected behavior, please [open an issue](../../issues) on GitHub.
->
-> _This section can be removed or modified if AI assistance was not used in your integration's development._
+> **AI-assisted development:** This integration was developed with assistance from AI coding agents (Claude, GitHub Copilot). If you encounter unexpected behaviour, please [open an issue](../../issues).
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
 
 ---
 
@@ -407,11 +165,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 [maintenance-shield]: https://img.shields.io/badge/maintainer-%40jeverley-blue.svg?style=for-the-badge
 [releases-shield]: https://img.shields.io/github/release/jeverley/napoleon-bbq-ha.svg?style=for-the-badge
 [releases]: https://github.com/jeverley/napoleon-bbq-ha/releases
-[user_profile]: https://github.com/jpawlowski
-
-<!-- Optional badge definitions - uncomment if needed:
-[buymecoffee]: https://www.buymeacoffee.com/jpawlowski
-[buymecoffeebadge]: https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg?style=for-the-badge
-[discord]: https://discord.gg/Qa5fW2R
-[discord-shield]: https://img.shields.io/discord/330944238910963714.svg?style=for-the-badge
--->
+[user_profile]: https://github.com/jeverley
