@@ -369,9 +369,10 @@ See `.github/instructions/blueprint.config_flow.instructions.md` for comprehensi
 - Write: send `Opr {"n": ..., "t": <type_code>, "v": <value>}` → grill replies with `opr`; `ukn {"o":"ukn","i":N,"s":3}` means invalid command (uses `s` not `p`)
 - Ayla type codes for `t` field in `Opr`/`gpr`/`Odp`: `0`=int, `1`=decimal, `3`=bool, `4`=string
 - **Odp/WiFi interaction (critical):** when grill has active WiFi/MQTT, it does NOT push `PRB_TMP_*` temperatures via BLE — they go via MQTT to Ayla cloud instead. State-change pushes (`PRB_STAT`, `TUNIT`, `LCD_OFF` etc.) still arrive over BLE. This is why `Gpr` polling at 30 s is required for temperature values in normal home use.
-- Connection lifecycle: `_connecting: bool` flag prevents concurrent `_connect_and_run` tasks from rapid advertisements; on disconnect `_on_disconnect` re-registers the advertisement callback so the coordinator reconnects when the grill powers on again
-- Failure cap: after `MAX_CONNECT_FAILURES = 5` consecutive failures in `_connect_and_run`, the advertisement callback is **not** re-registered — auto-reconnect stops until the config entry is reloaded; the `_connect_failures` counter resets to 0 after a successful authentication
-- Library: `bleak-retry-connector` (`establish_connection` + `BleakClientWithServiceCache`)
+- Connection lifecycle: `_connecting: bool` flag prevents concurrent `_connect_and_run` tasks from rapid re-advertisements; on disconnect `_on_disconnect` re-registers the advertisement callback so the coordinator reconnects when the grill powers on again; `_circuit_open: bool` is set after `MAX_CONNECT_FAILURES` to permanently suppress re-registration until entry reload
+- Failure cap: after `MAX_CONNECT_FAILURES = 5` consecutive advertisement-level failures in `_connect_and_run`, `_circuit_open` is set and auto-reconnect stops until the config entry is reloaded; `_connect_failures` resets to 0 after a successful authentication
+- Library: `bleak-retry-connector` (`establish_connection` with `max_attempts=1` + `BleakClientWithServiceCache`); `establish_connection` handles slot-draining via `wait_for_disconnect` and error classification before raising; outer retry is per-advertisement-event via `_connect_failures`
+- `habluetooth` always injects FAST connection params (7.5 ms interval) via `HaBleakClient.connect()` regardless of the call path — this is expected HA behaviour, not a bug
 - No BLE-layer bonding or encryption required (confirmed by hardware test); HMAC-SHA256 is the only auth gate
 
 **Prestige property sentinels and bitmasks:**

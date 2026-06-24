@@ -20,9 +20,10 @@ See _handover/CLAUDE.md — Protocol section.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
@@ -47,6 +48,7 @@ from homeassistant.components.bluetooth import (
     BluetoothChange,
     BluetoothScanningMode,
     BluetoothServiceInfoBleak,
+    async_ble_device_from_address,
     async_register_callback,
 )
 from homeassistant.core import CALLBACK_TYPE, callback
@@ -77,8 +79,13 @@ class NapoleonBBQBLEMixin:
         hass: HomeAssistant
         config_entry: NapoleonBBQConfigEntry
         data: NapoleonBBQGrillState
+        update_interval: timedelta | None
+        _poll_interval: int
 
         def async_set_updated_data(self, data: NapoleonBBQGrillState) -> None:  # noqa: D102
+            ...
+
+        async def async_refresh(self) -> None:  # noqa: D102
             ...
 
     def _init_ble(self, mac: str, local_key: str) -> None:
@@ -104,6 +111,8 @@ class NapoleonBBQBLEMixin:
         self._connecting: bool = False
         self._connect_failures: int = 0
         self._bt_cancel_callback: CALLBACK_TYPE | None = None
+        self._stopping: bool = False
+        self._circuit_open: bool = False
 
     # Connection state
 
@@ -125,7 +134,12 @@ class NapoleonBBQBLEMixin:
 
         Called after every disconnect (clean or error) so the coordinator
         reconnects automatically the next time an advertisement is seen.
+        Cancels any existing callback first to ensure at most one is ever active.
         """
+        if self._bt_cancel_callback is not None:
+            self._bt_cancel_callback()
+            self._bt_cancel_callback = None
+        LOGGER.debug("Napoleon BBQ %s: waiting for advertisement", self._mac)
         self._bt_cancel_callback = async_register_callback(
             self.hass,
             self._on_advertisement,
@@ -153,6 +167,21 @@ class NapoleonBBQBLEMixin:
         if self._bt_cancel_callback is not None:
             self._bt_cancel_callback()
             self._bt_cancel_callback = None
+        if self._connecting or self.connected:
+            # A connection is already in progress or established. Discard this
+            # advertisement — _connect_and_run will re-register the callback when
+            # the current attempt concludes.
+            LOGGER.debug(
+                "Napoleon BBQ %s: advertisement ignored — already %s",
+                self._mac,
+                "connecting" if self._connecting else "connected",
+            )
+            return
+        LOGGER.debug(
+            "Napoleon BBQ %s: advertisement received (rssi=%s), connecting",
+            self._mac,
+            service_info.advertisement.rssi,
+        )
         self.config_entry.async_create_background_task(
             self.hass,
             self._connect_and_run(service_info.device),
@@ -163,15 +192,18 @@ class NapoleonBBQBLEMixin:
         """
         Establish a BLE connection, authenticate, and maintain the session.
 
-        Connects using ``bleak_retry_connector`` for robustness, waits for
-        MTU negotiation to settle, subscribes to outbox notifications, then
-        performs the Ayla Local Control v2 authentication handshake. Any
-        error during connect or auth causes an immediate disconnect and
-        re-registration of the advertisement callback.
+        Uses ``establish_connection`` (``bleak_retry_connector``) for robust BLE
+        connection with automatic slot-draining, backoff, and error classification.
+        After a successful connect, subscribes to outbox notifications and performs
+        the Ayla Local Control v2 authentication handshake.
 
-        After ``MAX_CONNECT_FAILURES`` consecutive failures the advertisement
-        callback is not re-registered, stopping auto-reconnect. Reload the
-        entry to resume.
+        Any error during connect or auth increments the failure counter. After
+        ``MAX_CONNECT_FAILURES`` consecutive failures the circuit breaker opens
+        (``_circuit_open = True``) and auto-reconnect stops. Reload the entry to
+        resume.
+
+        Returns immediately without counting a failure if ``_stopping`` is set
+        after a successful connect (entry is being unloaded).
 
         Args:
             device: The ``BLEDevice`` to connect to.
@@ -181,36 +213,82 @@ class NapoleonBBQBLEMixin:
             return
         self._connecting = True
         try:
+            LOGGER.debug(
+                "Napoleon BBQ %s: BLE connect (failure_count=%d/%d)",
+                self._mac,
+                self._connect_failures,
+                MAX_CONNECT_FAILURES,
+            )
             client = await establish_connection(
                 BleakClientWithServiceCache,
                 device,
                 self._mac,
                 disconnected_callback=self._on_disconnect,
-                use_services_cache=True,
+                max_attempts=1,
+                ble_device_callback=lambda: (
+                    async_ble_device_from_address(self.hass, self._mac, connectable=True) or device
+                ),
             )
-            await asyncio.sleep(ENCRYPT_SETTLE)
+            if self._stopping:
+                # Shutdown raced the connect; disconnect cleanly and exit without
+                # incrementing the failure counter.
+                with contextlib.suppress(Exception):
+                    await client.disconnect()
+                return
+            LOGGER.debug("Napoleon BBQ %s: BLE connected, subscribing to outbox", self._mac)
             self._seq = 0
             self._assembler = NapoleonBBQOutboxAssembler()
-            self._auth_ok.clear()
-            self._client = client  # set before start_notify so immediate Odp ACKs can be sent
+            # Assign self._client before sleeping so _shutdown_ble can disconnect us
+            # if it races this window, and so immediate Odp ACKs from start_notify
+            # can be sent via _send_msg.
+            self._client = client
+            await asyncio.sleep(ENCRYPT_SETTLE)
             await client.start_notify(OUTBOX_UUID, self._on_notification)
             self._mtu = client.mtu_size
-            LOGGER.debug("Connected to Napoleon BBQ %s (MTU=%d)", self._mac, self._mtu)
+            LOGGER.debug("Napoleon BBQ %s: outbox subscribed (MTU=%d)", self._mac, self._mtu)
             await self._authenticate()
         except Exception:  # noqa: BLE001
             self._connect_failures += 1
             if self._connect_failures >= MAX_CONNECT_FAILURES:
                 LOGGER.error(
-                    "Napoleon BBQ %s: %d consecutive connection failures — stopping auto-reconnect. "
-                    "Reload the integration entry to retry.",
+                    "Napoleon BBQ %s: %d consecutive connection failures — stopping auto-reconnect; "
+                    "reload the integration entry to retry",
                     self._mac,
                     self._connect_failures,
                 )
-                self._client = None
-                self._auth_ok.clear()
+                # Open the circuit breaker so _on_disconnect does not restart auto-reconnect
+                # when the grill eventually drops this connection.
+                self._circuit_open = True
+                if self._client is not None:
+                    # Post-connect failure at the limit: disconnect fires _on_disconnect which
+                    # sees _circuit_open=True and skips re-registration.
+                    client_ref = self._client
+                    self._client = None
+                    self._auth_ok.clear()
+                    with contextlib.suppress(Exception):
+                        await client_ref.disconnect()
+                # If self._client is None, establish_connection already drained the slot.
             else:
                 LOGGER.exception("Error connecting to Napoleon BBQ %s", self._mac)
-                self._on_disconnect(None)
+                if self._client is not None:
+                    # Post-connect failure (auth timeout, start_notify error, etc.):
+                    # explicit disconnect triggers _on_disconnect via the BleakClient
+                    # callback, which clears state and re-registers the advertisement
+                    # callback so the grill sees a clean teardown before we retry.
+                    client_ref = self._client
+                    self._client = None
+                    self._auth_ok.clear()
+                    try:
+                        await client_ref.disconnect()
+                    except Exception:  # noqa: BLE001
+                        # disconnect() raised before the BleakClient callback could fire;
+                        # call _on_disconnect manually so auto-reconnect can continue.
+                        self._on_disconnect(None)
+                else:
+                    # establish_connection itself failed and already called
+                    # wait_for_disconnect internally before raising, so the BlueZ slot
+                    # is drained. Just re-register the advertisement callback.
+                    self._on_disconnect(None)
         finally:
             self._connecting = False
 
@@ -224,23 +302,33 @@ class NapoleonBBQBLEMixin:
         (auth success) to be signalled via the ``_auth_ok`` event.
         """
         self._auth_ok.clear()
+        LOGGER.debug("Napoleon BBQ %s: sending auth challenge request (Oac t:1)", self._mac)
         await self._send_msg("Oac", {"t": 1, "i": AUTH_USER})
         try:
             await asyncio.wait_for(self._auth_ok.wait(), timeout=AUTH_TIMEOUT)
             self._connect_failures = 0
-            LOGGER.debug("Authenticated with Napoleon BBQ %s", self._mac)
+            LOGGER.debug("Napoleon BBQ %s: authenticated", self._mac)
+            self.update_interval = timedelta(seconds=self._poll_interval)
+            self.config_entry.async_create_background_task(
+                self.hass,
+                self.async_refresh(),
+                f"napoleon_bbq_initial_poll_{self._mac}",
+            )
         except TimeoutError:
             LOGGER.warning("Authentication timed out for Napoleon BBQ %s", self._mac)
-            if self._client is not None:
-                await self._client.disconnect()
+            # Re-raise so _connect_and_run's except block counts this as a failure.
+            # _connect_and_run then disconnects the client explicitly.
+            raise
 
     @callback
-    def _on_disconnect(self, client: BleakClient | None) -> None:
+    def _on_disconnect(self, client: BleakClientWithServiceCache | None) -> None:
         """
         Handle a BLE disconnection.
 
         Clears all connection state and re-registers the advertisement callback
-        so the coordinator reconnects when the grill powers on again.
+        so the coordinator reconnects when the grill powers on again. Does not
+        re-register the callback during an intentional shutdown (``_stopping``) or
+        when the circuit breaker has opened after repeated failures (``_circuit_open``).
 
         Args:
             client: The disconnected BleakClient, or None if called manually.
@@ -248,8 +336,10 @@ class NapoleonBBQBLEMixin:
         """
         self._client = None
         self._auth_ok.clear()
+        self.update_interval = None
         LOGGER.debug("Disconnected from Napoleon BBQ %s — waiting for advertisement", self._mac)
-        self._register_bt_callback()
+        if not self._stopping and not self._circuit_open:
+            self._register_bt_callback()
 
     # GATT notification routing
 
@@ -290,38 +380,49 @@ class NapoleonBBQBLEMixin:
             t = payload.get("t")
             if t == 1:
                 challenge = payload.get("c", "")
-                self.hass.async_create_background_task(
+                LOGGER.debug(
+                    "Napoleon BBQ %s: auth challenge received (oac t:1), sending HMAC response",
+                    self._mac,
+                )
+                self.config_entry.async_create_background_task(
+                    self.hass,
                     self._send_hmac_response(challenge),
                     f"napoleon_bbq_auth_response_{self._mac}",
                 )
             elif t == 2:
+                LOGGER.debug("Napoleon BBQ %s: auth accepted by grill (oac t:2)", self._mac)
                 self._auth_ok.set()
+            else:
+                LOGGER.debug("Napoleon BBQ %s: unexpected oac t=%s", self._mac, t)
         elif opcode == "gpr":
             name = payload.get("n")
             value = payload.get("v")
             if name is not None and value is not None:
+                LOGGER.debug("Napoleon BBQ %s: gpr %s=%r", self._mac, name, value)
                 self.data.update_from_property(name, value)
                 self.async_set_updated_data(self.data)
         elif opcode == "Odp":
             name = payload.get("n")
             value = payload.get("v")
             if name is not None and value is not None:
+                LOGGER.debug("Napoleon BBQ %s: push %s=%r (seq=%d)", self._mac, name, value, seq)
                 self.data.update_from_property(name, value)
                 self.async_set_updated_data(self.data)
-                self.hass.async_create_background_task(
+                self.config_entry.async_create_background_task(
+                    self.hass,
                     self._send_msg("odp", {"n": name}, ack_seq=seq),
                     f"napoleon_bbq_odp_ack_{self._mac}",
                 )
         elif opcode == "opr":
-            LOGGER.debug("Received opr from Napoleon BBQ (n=%s)", payload.get("n"))
+            LOGGER.debug("Napoleon BBQ %s: opr ack (n=%s)", self._mac, payload.get("n"))
         elif opcode == "ukn":
             LOGGER.warning(
-                "Napoleon BBQ %s returned ukn (invalid command, s=%s)",
+                "Napoleon BBQ %s: ukn — invalid command rejected by grill (s=%s)",
                 self._mac,
                 msg.get("s"),
             )
         else:
-            LOGGER.debug("Unhandled opcode '%s' from Napoleon BBQ %s", opcode, self._mac)
+            LOGGER.debug("Napoleon BBQ %s: unhandled opcode '%s'", self._mac, opcode)
 
     # GATT write helpers
 
@@ -366,6 +467,11 @@ class NapoleonBBQBLEMixin:
 
         """
         if self._client is None:
+            LOGGER.debug(
+                "Napoleon BBQ %s: _send_msg(%s) called while disconnected — dropped",
+                self._mac,
+                opcode,
+            )
             return
         if ack_seq is not None:
             seq = ack_seq
@@ -374,11 +480,22 @@ class NapoleonBBQBLEMixin:
             seq = self._seq
         msg = make_msg(opcode, payload, seq)
         chunks = encode_inbox(msg, self._mtu)
+        LOGGER.debug(
+            "Napoleon BBQ %s: TX %s seq=%d (%d chunk(s), MTU=%d)",
+            self._mac,
+            opcode,
+            seq,
+            len(chunks),
+            self._mtu,
+        )
         async with self._write_lock:
             if self._client is None:
                 return
+            # Snapshot to a local variable; self._client can be nulled by the
+            # exception handler in _connect_and_run between chunk iterations.
+            ble_client = self._client
             for chunk in chunks:
-                await self._client.write_gatt_char(INBOX_UUID, chunk, response=True)
+                await ble_client.write_gatt_char(INBOX_UUID, chunk, response=True)
 
     async def _poll_properties(self) -> None:
         """
@@ -411,8 +528,13 @@ class NapoleonBBQBLEMixin:
         Tear down BLE state cleanly.
 
         Cancels any pending advertisement callback and disconnects the BLE client.
+        Sets ``_stopping`` before disconnecting so that ``_on_disconnect`` does not
+        re-register the advertisement callback after the entry is unloaded.
+
         Called from ``NapoleonBBQDataUpdateCoordinator.async_shutdown``.
         """
+        LOGGER.debug("Napoleon BBQ %s: shutting down BLE", self._mac)
+        self._stopping = True
         if self._bt_cancel_callback is not None:
             self._bt_cancel_callback()
             self._bt_cancel_callback = None

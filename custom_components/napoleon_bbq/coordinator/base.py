@@ -12,7 +12,6 @@ https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from custom_components.napoleon_bbq.config_flow_handler.schemas import CONF_POLL_INTERVAL
@@ -67,12 +66,12 @@ class NapoleonBBQDataUpdateCoordinator(DataUpdateCoordinator[NapoleonBBQGrillSta
                 ``CONF_LOCAL_KEY`` in its data.
 
         """
-        poll_interval = config_entry.options.get(CONF_POLL_INTERVAL, POLL_INTERVAL_S)
+        self._poll_interval: int = config_entry.options.get(CONF_POLL_INTERVAL, POLL_INTERVAL_S)
         super().__init__(
             hass,
             LOGGER,
             name=f"{DOMAIN}_{subentry.data[CONF_MAC]}",
-            update_interval=timedelta(seconds=poll_interval),
+            update_interval=None,
         )
         self.config_entry = config_entry
         self._subentry = subentry

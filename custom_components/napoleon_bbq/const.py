@@ -27,10 +27,10 @@ CONF_MAC = "mac_address"
 CONF_DSN = "dsn"
 
 # Timings (seconds)
-POLL_INTERVAL_S = 30
 AUTH_TIMEOUT = 15
 ENCRYPT_SETTLE = 0.5
 MAX_CONNECT_FAILURES = 5
+POLL_INTERVAL_S = 30
 
 # Ayla property type codes
 PROP_TYPE_INT = 0
