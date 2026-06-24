@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0](https://github.com/jeverley/napoleon-bbq-ha/compare/v0.1.3...v0.2.0) (2026-06-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* domain changed from napoleon_bbq to napoleon_home
+
+### Features
+
+* rebrand integration from Napoleon BBQ to Napoleon Home ([ca4149e](https://github.com/jeverley/napoleon-bbq-ha/commit/ca4149e3a73d53486bbf22da473fe67ad904e436))
+
+
+### Bug Fixes
+
+* **devcontainer:** make Claude persistence resilient across rebuilds ([1f85144](https://github.com/jeverley/napoleon-bbq-ha/commit/1f851448080b3f86872268cb3f1e6ade46706a6a))
+* update .prettierignore for napoleon_home domain rename ([cf70972](https://github.com/jeverley/napoleon-bbq-ha/commit/cf7097251e7070d8335a57d0c610ea3d14a43299))
+
 ## [0.1.3](https://github.com/jeverley/napoleon-bbq-ha/compare/v0.1.2...v0.1.3) (2026-06-24)
 
 
