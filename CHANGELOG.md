@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/jeverley/napoleon-bbq-ha/compare/v0.1.2...v0.1.3) (2026-06-24)
+
+
+### Features
+
+* replace backlight switch+select with light entity; rename battery saver ([7d28520](https://github.com/jeverley/napoleon-bbq-ha/commit/7d285202a05c82d2679332ecfc5ac37ff917f062))
+
 ## [0.1.2](https://github.com/jeverley/napoleon-bbq-ha/compare/v0.1.1...v0.1.2) (2026-06-24)
 
 
