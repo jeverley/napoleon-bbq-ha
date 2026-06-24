@@ -13,10 +13,10 @@ Read `AGENTS.md` completely before starting any work. It contains:
 
 ## Quick Reference
 
-- **Domain:** `napoleon_bbq`
-- **Title:** Napoleon BBQ
-- **Class prefix:** `NapoleonBBQ`
-- **Main code:** `custom_components/napoleon_bbq/`
+- **Domain:** `napoleon_home`
+- **Title:** Napoleon Home
+- **Class prefix:** `NapoleonHome`
+- **Main code:** `custom_components/napoleon_home/`
 - **Validate:** `script/check` (type-check + lint + spell)
 - **Test:** `script/test`
 - **Run HA:** `./script/develop`

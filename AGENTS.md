@@ -8,13 +8,13 @@ This is a Home Assistant custom integration for Napoleon Prestige BBQ grills. Th
 
 **Integration details:**
 
-- **Domain:** `napoleon_bbq`
-- **Title:** Napoleon BBQ
+- **Domain:** `napoleon_home`
+- **Title:** Napoleon Home
 - **Repository:** jeverley/napoleon-bbq-ha
 
 **Key directories:**
 
-- `custom_components/napoleon_bbq/` - Main integration code
+- `custom_components/napoleon_home/` - Main integration code
 - `config/` - Home Assistant configuration for local testing
 - `tests/` - Unit and integration tests
 - `script/` - Development and validation scripts
@@ -51,7 +51,7 @@ pkill -f "hass --config" || true && pkill -f "debugpy.*5678" || true && ./script
 
 **Adjusting log levels:**
 
-- Integration logs: `custom_components.napoleon_bbq: debug` in `config/configuration.yaml`
+- Integration logs: `custom_components.napoleon_home: debug` in `config/configuration.yaml`
 - You can modify log levels when debugging - just restart HA after changes
 
 **Context-specific instructions:**
@@ -187,15 +187,15 @@ As an AI agent, **aim for Silver or Gold Quality Scale** when generating code:
 
 This integration uses the following identifiers consistently:
 
-- **Domain:** `napoleon_bbq`
-- **Title:** Napoleon BBQ
-- **Class prefix:** `NapoleonBBQ`
+- **Domain:** `napoleon_home`
+- **Title:** Napoleon Home
+- **Class prefix:** `NapoleonHome`
 
 **When creating new files:**
 
-- Use the domain `napoleon_bbq` for all DOMAIN references
-- Prefix all integration-specific classes with `NapoleonBBQ`
-- Use "Napoleon BBQ" as the display title
+- Use the domain `napoleon_home` for all DOMAIN references
+- Prefix all integration-specific classes with `NapoleonHome`
+- Use "Napoleon Home" as the display title
 - Never hardcode different values
 
 ### Integration Structure
@@ -252,15 +252,15 @@ This integration uses a hub/sub-entry model — **not** a single-config-entry-pe
 
 **Type aliases (see `data.py`):**
 
-- `NapoleonBBQConfigEntry = ConfigEntry[NapoleonBBQCoordinators]`
-- `NapoleonBBQCoordinators = dict[str, NapoleonBBQDataUpdateCoordinator]` — keyed by `subentry_id` (not DSN, not MAC)
+- `NapoleonHomeConfigEntry = ConfigEntry[NapoleonHomeCoordinators]`
+- `NapoleonHomeCoordinators = dict[str, NapoleonHomeDataUpdateCoordinator]` — keyed by `subentry_id` (not DSN, not MAC)
 
-**`runtime_data`** is `NapoleonBBQCoordinators` (a plain `dict`). The `__init__.py` setup loop iterates `entry.subentries.items()` and filters by `subentry_type == SUBENTRY_TYPE_DEVICE`.
+**`runtime_data`** is `NapoleonHomeCoordinators` (a plain `dict`). The `__init__.py` setup loop iterates `entry.subentries.items()` and filters by `subentry_type == SUBENTRY_TYPE_DEVICE`.
 
 **Critical rules:**
 
 - `ConfigSubentry.data` **must** be a `MappingProxyType` when constructing a `ConfigSubentry` for `async_add_subentry` directly
-- `ConfigFlowHandler` **must** implement `async_get_supported_subentry_types()` returning `{SUBENTRY_TYPE_DEVICE: NapoleonBBQGrillSubentryFlowHandler}`
+- `ConfigFlowHandler` **must** implement `async_get_supported_subentry_types()` returning `{SUBENTRY_TYPE_DEVICE: NapoleonHomeGrillSubentryFlowHandler}`
 - When adding entities for a sub-entry, pass `config_subentry_id=subentry_id` to `AddConfigEntryEntitiesCallback` — omitting it silently attaches entities to the hub entry, breaking device attribution
 
 **MAC casing convention:** stored uppercase in config data (`CONF_MAC: "EC:64:C9:05:1F:2A"`), lowercase for unique IDs (`unique_id="ec:64:c9:05:1f:2a"`).
@@ -475,7 +475,7 @@ See `.github/instructions/blueprint.repairs.instructions.md` for comprehensive p
 
 **Entities:**
 
-- Inherit from platform base + `NapoleonBBQEntity`
+- Inherit from platform base + `NapoleonHomeEntity`
 - Read from `coordinator.data`, never call API directly
 - Use `EntityDescription` for static metadata
 
@@ -647,7 +647,7 @@ After auto-fixes are applied, only manually edit files for errors that **remain 
 
 **Test structure:**
 
-- `tests/` mirrors `custom_components/napoleon_bbq/` structure
+- `tests/` mirrors `custom_components/napoleon_home/` structure
 - Use fixtures for common setup (Home Assistant mock, coordinator, etc.)
 - Mock external API calls
 

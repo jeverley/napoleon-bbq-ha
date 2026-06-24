@@ -1,7 +1,7 @@
 # Examples
 
 This page provides ready-to-use examples for automations, dashboards, and blueprints
-with the Napoleon BBQ custom integration.
+with the Napoleon Home custom integration.
 
 Replace entity IDs like `sensor.device_name_*` with your actual entity IDs after
 setting up the integration.
@@ -54,7 +54,7 @@ automation:
         weekday:
           - mon
     action:
-      - action: napoleon_bbq.example_service
+      - action: napoleon_home.example_service
         target:
           entity_id: button.device_name_reset_filter
 ```
@@ -65,7 +65,7 @@ Save this as a blueprint file and import it in Home Assistant:
 
 ```yaml
 blueprint:
-  name: Napoleon BBQ — Threshold Alert
+  name: Napoleon Home — Threshold Alert
   description: Send a notification when a sensor exceeds a configurable threshold.
   domain: automation
   input:
@@ -74,7 +74,7 @@ blueprint:
       selector:
         entity:
           domain: sensor
-          integration: napoleon_bbq
+          integration: napoleon_home
     threshold:
       name: Threshold value
       selector:
