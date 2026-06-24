@@ -1,4 +1,4 @@
-"""Select platform for napoleon_bbq."""
+"""Light platform for napoleon_bbq."""
 
 from __future__ import annotations
 
@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING
 
 from custom_components.napoleon_bbq.const import PARALLEL_UPDATES as PARALLEL_UPDATES
 
-from .gas_unit import ENTITY_DESCRIPTIONS as GAS_UNIT_DESCRIPTIONS, NapoleonBBQGasUnitSelect
-from .temp_unit import ENTITY_DESCRIPTIONS as TEMP_UNIT_DESCRIPTIONS, NapoleonBBQTempUnitSelect
+from .backlight import ENTITY_DESCRIPTIONS as BACKLIGHT_DESCRIPTIONS, NapoleonBBQBacklightLight
 
 if TYPE_CHECKING:
     from custom_components.napoleon_bbq.data import NapoleonBBQConfigEntry
@@ -20,25 +19,15 @@ async def async_setup_entry(
     entry: NapoleonBBQConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the select platform."""
+    """Set up the light platform."""
     for subentry_id, coordinator in entry.runtime_data.items():
         async_add_entities(
             (
-                NapoleonBBQTempUnitSelect(
+                NapoleonBBQBacklightLight(
                     coordinator=coordinator,
                     entity_description=entity_description,
                 )
-                for entity_description in TEMP_UNIT_DESCRIPTIONS
-            ),
-            config_subentry_id=subentry_id,
-        )
-        async_add_entities(
-            (
-                NapoleonBBQGasUnitSelect(
-                    coordinator=coordinator,
-                    entity_description=entity_description,
-                )
-                for entity_description in GAS_UNIT_DESCRIPTIONS
+                for entity_description in BACKLIGHT_DESCRIPTIONS
             ),
             config_subentry_id=subentry_id,
         )

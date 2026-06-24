@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING
 
 from custom_components.napoleon_bbq.const import PARALLEL_UPDATES as PARALLEL_UPDATES
 
-from .battery_saver import ENTITY_DESCRIPTIONS as BATTERY_SAVER_DESCRIPTIONS, NapoleonBBQBatterySaverSwitch
-from .lcd_off import ENTITY_DESCRIPTIONS as LCD_OFF_DESCRIPTIONS, NapoleonBBQLcdOffSwitch
+from .battery_saver import ENTITY_DESCRIPTIONS as DISPLAY_POWER_SAVE_DESCRIPTIONS, NapoleonBBQDisplayPowerSaveSwitch
 
 if TYPE_CHECKING:
     from custom_components.napoleon_bbq.data import NapoleonBBQConfigEntry
@@ -24,21 +23,11 @@ async def async_setup_entry(
     for subentry_id, coordinator in entry.runtime_data.items():
         async_add_entities(
             (
-                NapoleonBBQLcdOffSwitch(
+                NapoleonBBQDisplayPowerSaveSwitch(
                     coordinator=coordinator,
                     entity_description=entity_description,
                 )
-                for entity_description in LCD_OFF_DESCRIPTIONS
-            ),
-            config_subentry_id=subentry_id,
-        )
-        async_add_entities(
-            (
-                NapoleonBBQBatterySaverSwitch(
-                    coordinator=coordinator,
-                    entity_description=entity_description,
-                )
-                for entity_description in BATTERY_SAVER_DESCRIPTIONS
+                for entity_description in DISPLAY_POWER_SAVE_DESCRIPTIONS
             ),
             config_subentry_id=subentry_id,
         )

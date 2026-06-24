@@ -126,12 +126,14 @@
         "name": "Firmware version"
       }
     },
+    "light": {
+      "backlight": {
+        "name": "Knob backlight"
+      }
+    },
     "switch": {
-      "lcd_off": {
-        "name": "Knob backlights off"
-      },
-      "battery_saver": {
-        "name": "Battery saver"
+      "display_power_save": {
+        "name": "Display power save"
       }
     },
     "select": {
@@ -140,14 +142,6 @@
         "state": {
           "celsius": "Celsius",
           "fahrenheit": "Fahrenheit"
-        }
-      },
-      "brightness": {
-        "name": "Knob backlight brightness",
-        "state": {
-          "low": "Low",
-          "medium": "Medium",
-          "high": "High"
         }
       },
       "gas_unit": {
