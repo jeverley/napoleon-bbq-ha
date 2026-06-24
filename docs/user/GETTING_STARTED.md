@@ -1,6 +1,6 @@
-# Getting Started with Napoleon BBQ
+# Getting Started with Napoleon Home
 
-This guide will help you install and set up the Napoleon BBQ custom integration for Home Assistant.
+This guide will help you install and set up the Napoleon Home custom integration for Home Assistant.
 
 ## Prerequisites
 
@@ -19,15 +19,15 @@ This guide will help you install and set up the Napoleon BBQ custom integration 
 5. Add this repository URL: `https://github.com/jeverley/napoleon-bbq-ha`
 6. Set category to "Integration"
 7. Click "Add"
-8. Find "Napoleon BBQ" in the integration list
+8. Find "Napoleon Home" in the integration list
 9. Click "Download"
 10. Restart Home Assistant
 
 ### Manual Installation
 
 1. Download the latest release from the [releases page](https://github.com/jeverley/napoleon-bbq-ha/releases)
-2. Extract the `napoleon_bbq` folder from the archive
-3. Copy it to `custom_components/napoleon_bbq/` in your Home Assistant configuration directory
+2. Extract the `napoleon_home` folder from the archive
+3. Copy it to `custom_components/napoleon_home/` in your Home Assistant configuration directory
 4. Restart Home Assistant
 
 ## Initial Setup
@@ -36,7 +36,7 @@ After installation, add the integration:
 
 1. Go to **Settings** → **Devices & Services**
 2. Click **+ Add Integration**
-3. Search for "Napoleon BBQ"
+3. Search for "Napoleon Home"
 4. Follow the configuration steps:
 
 ### Step 1: Connection Information
@@ -99,13 +99,13 @@ Add entities to your dashboard:
 1. Go to your dashboard
 2. Click **Edit Dashboard** → **Add Card**
 3. Choose card type (e.g., "Entities", "Glance")
-4. Select entities from "Napoleon BBQ"
+4. Select entities from "Napoleon Home"
 
 Example entities card:
 
 ```yaml
 type: entities
-title: Napoleon BBQ
+title: Napoleon Home
 entities:
   - sensor.device_name_sensor
   - binary_sensor.device_name_connectivity
@@ -172,7 +172,7 @@ Enable debug logging to troubleshoot issues:
 logger:
   default: warning
   logs:
-    custom_components.napoleon_bbq: debug
+    custom_components.napoleon_home: debug
 ```
 
 Add this to `configuration.yaml`, restart, and reproduce the issue. Check logs for detailed information.

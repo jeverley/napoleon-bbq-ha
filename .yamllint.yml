@@ -1,5 +1,5 @@
 ---
-# yamllint configuration for napoleon_bbq
+# yamllint configuration for napoleon_home
 # Documentation: https://yamllint.readthedocs.io/en/stable/rules.html
 
 extends: default

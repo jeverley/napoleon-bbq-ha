@@ -131,7 +131,7 @@ setup time to authenticate and fetch the per-device BLE `local_key`.
 
 - `api/` package is setup-time only; not imported at runtime
 - `bluetooth/` package added for Ayla Local Control v2 protocol framing and HMAC-SHA256 auth
-- `coordinator/` holds a persistent BLE connection via `NapoleonBBQBLEMixin`
+- `coordinator/` holds a persistent BLE connection via `NapoleonHomeBLEMixin`
 - `iot_class: local_polling` (polling required for temperatures; see Push + Poll Hybrid decision)
 
 ---
@@ -144,7 +144,7 @@ setup time to authenticate and fetch the per-device BLE `local_key`.
 "Future Considerations" noted "Multi-Device Support" as not yet implemented.
 
 **Decision:** One config entry per Napoleon account (the hub), one `ConfigSubentry` per grill.
-`entry.runtime_data` is `dict[str, NapoleonBBQDataUpdateCoordinator]` keyed by `subentry_id`.
+`entry.runtime_data` is `dict[str, NapoleonHomeDataUpdateCoordinator]` keyed by `subentry_id`.
 
 **Rationale:**
 

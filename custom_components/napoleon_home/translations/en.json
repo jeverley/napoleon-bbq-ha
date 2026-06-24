@@ -1,0 +1,175 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Napoleon Home",
+        "description": "Enter your Napoleon app account credentials to connect your Napoleon Home account. The grill must be registered in the Napoleon app.{name}",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "region": "Region",
+          "mac_address": "Grill MAC address"
+        },
+        "data_description": {
+          "mac_address": "Bluetooth MAC address of the grill (e.g. AA:BB:CC:DD:EE:FF). Leave blank if the grill was discovered automatically."
+        }
+      },
+      "pick_device": {
+        "title": "Select grill",
+        "description": "Multiple Napoleon Prestige grills were found in your account. Select the one to configure.",
+        "data": {
+          "dsn": "Grill"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Napoleon Home",
+        "description": "The local key for {name} needs to be refreshed. Enter your Napoleon app account credentials.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "region": "Region"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials. Check your Napoleon app email and password.",
+      "cannot_connect": "Failed to connect to the Napoleon cloud. Check your internet connection.",
+      "no_devices_found": "No Napoleon Prestige grills found in your account.",
+      "unknown": "Unexpected error. Check the Home Assistant logs for details."
+    },
+    "abort": {
+      "already_configured": "This Napoleon Home grill is already configured.",
+      "device_added_to_account": "The Napoleon Home grill has been added to your existing account."
+    }
+  },
+  "config_subentries": {
+    "device": {
+      "entry_type": "Napoleon Home grill",
+      "initiate_flow": {
+        "user": "Add grill"
+      },
+      "step": {
+        "user": {
+          "title": "Add Napoleon Home grill",
+          "description": "Enter your Napoleon app account password and the Bluetooth MAC address of the grill to add.",
+          "data": {
+            "password": "Password",
+            "mac_address": "Grill MAC address"
+          },
+          "data_description": {
+            "mac_address": "Bluetooth MAC address of the grill (e.g. AA:BB:CC:DD:EE:FF)."
+          }
+        },
+        "pick_device": {
+          "title": "Select grill",
+          "description": "Multiple Napoleon Prestige grills were found. Select the one matching the MAC address you entered.",
+          "data": {
+            "dsn": "Grill"
+          }
+        }
+      },
+      "error": {
+        "invalid_auth": "Invalid credentials. Check your Napoleon app email and password.",
+        "cannot_connect": "Failed to connect to the Napoleon cloud. Check your internet connection.",
+        "unknown": "Unexpected error. Check the Home Assistant logs for details."
+      },
+      "abort": {
+        "already_configured": "This Napoleon Home grill is already configured.",
+        "no_devices_found": "No unconfigured Napoleon Prestige grills found in your account."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Napoleon Home options",
+        "data": {
+          "poll_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "poll_interval": "How often to request a full property update from the grill while connected."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "update_failed": {
+      "message": "Failed to poll properties from the Napoleon Home grill."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "Connected"
+      }
+    },
+    "sensor": {
+      "probe_1_temp": {
+        "name": "Probe 1 temperature"
+      },
+      "probe_2_temp": {
+        "name": "Probe 2 temperature"
+      },
+      "probe_3_temp": {
+        "name": "Probe 3 temperature"
+      },
+      "probe_4_temp": {
+        "name": "Probe 4 temperature"
+      },
+      "battery_level": {
+        "name": "Battery level"
+      },
+      "tank_weight": {
+        "name": "Gas tank weight"
+      },
+      "firmware_version": {
+        "name": "Firmware version"
+      }
+    },
+    "light": {
+      "backlight": {
+        "name": "Knob backlight"
+      }
+    },
+    "switch": {
+      "display_power_save": {
+        "name": "Display power save"
+      }
+    },
+    "select": {
+      "temp_unit": {
+        "name": "Temperature unit",
+        "state": {
+          "celsius": "Celsius",
+          "fahrenheit": "Fahrenheit"
+        }
+      },
+      "gas_unit": {
+        "name": "Gas unit",
+        "state": {
+          "kg": "Kilograms",
+          "lbs": "Pounds"
+        }
+      }
+    },
+    "number": {
+      "probe_1_target_temp": {
+        "name": "Probe 1 target temperature"
+      },
+      "probe_2_target_temp": {
+        "name": "Probe 2 target temperature"
+      },
+      "probe_3_target_temp": {
+        "name": "Probe 3 target temperature"
+      },
+      "probe_4_target_temp": {
+        "name": "Probe 4 target temperature"
+      }
+    },
+    "button": {
+      "turn_off": {
+        "name": "Turn off grill"
+      }
+    }
+  }
+}

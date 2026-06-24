@@ -1,6 +1,6 @@
 # GitHub Codespaces Development Guide
 
-Napoleon BBQ is fully compatible with GitHub Codespaces for cloud-based development.
+Napoleon Home is fully compatible with GitHub Codespaces for cloud-based development.
 
 ## Quick Start
 

@@ -1,15 +1,15 @@
 # Architecture Overview
 
-This document describes the technical architecture of the Napoleon BBQ custom component for Home Assistant.
+This document describes the technical architecture of the Napoleon Home custom component for Home Assistant.
 
 ## Directory Structure
 
 ```text
-custom_components/napoleon_bbq/
+custom_components/napoleon_home/
 ├── __init__.py                   # Integration setup and unload; hub/subentry coordinator loop
 ├── config_flow.py                # Thin re-export required by hassfest
 ├── const.py                      # Constants, GATT UUIDs, Ayla credentials, timing constants
-├── data.py                       # Type aliases and NapoleonBBQGrillState dataclass
+├── data.py                       # Type aliases and NapoleonHomeGrillState dataclass
 ├── diagnostics.py                # Diagnostic data redaction
 ├── manifest.json                 # Integration metadata
 ├── translations/
@@ -17,16 +17,16 @@ custom_components/napoleon_bbq/
 │
 ├── api/                          # Ayla cloud API client (setup time only)
 │   ├── __init__.py
-│   └── client.py                 # NapoleonBBQApiClient: auth, device list, local key fetch
+│   └── client.py                 # NapoleonHomeApiClient: auth, device list, local key fetch
 │
-├── bluetooth/                    # Ayla Local Control v2 BLE protocol (Napoleon BBQ addition)
+├── bluetooth/                    # Ayla Local Control v2 BLE protocol (Napoleon Home addition)
 │   ├── __init__.py
 │   └── protocol.py               # Framing, HMAC-SHA256, JSON encode/decode
 │
 ├── coordinator/                  # BLE DataUpdateCoordinator
 │   ├── __init__.py
-│   ├── base.py                   # NapoleonBBQDataUpdateCoordinator class
-│   └── listeners.py              # NapoleonBBQBLEMixin: connection lifecycle, auth, GATT routing
+│   ├── base.py                   # NapoleonHomeDataUpdateCoordinator class
+│   └── listeners.py              # NapoleonHomeBLEMixin: connection lifecycle, auth, GATT routing
 │
 ├── config_flow_handler/          # Config and options flows
 │   ├── __init__.py               # Re-exports all flow handler classes
@@ -39,7 +39,7 @@ custom_components/napoleon_bbq/
 │
 ├── entity/                       # Base entity
 │   ├── __init__.py
-│   └── base.py                   # NapoleonBBQEntity: unique_id, device_info, coordinator binding
+│   └── base.py                   # NapoleonHomeEntity: unique_id, device_info, coordinator binding
 │
 ├── entity_utils/                 # Shared entity helpers
 │   ├── __init__.py
@@ -77,7 +77,7 @@ custom_components/napoleon_bbq/
 
 ## Hub and Sub-entry Architecture
 
-> **Napoleon BBQ:** This integration uses a hub/sub-entry model rather than the single-coordinator
+> **Napoleon Home:** This integration uses a hub/sub-entry model rather than the single-coordinator
 > pattern described in the blueprint template.
 
 - **One config entry per Napoleon account** (the hub). Hub data: `{CONF_REGION, CONF_USERNAME}`.
@@ -90,13 +90,13 @@ ConfigEntry (hub — one per account)
 └── ...
 ```
 
-`entry.runtime_data` is `dict[str, NapoleonBBQDataUpdateCoordinator]` keyed by `subentry_id`.
+`entry.runtime_data` is `dict[str, NapoleonHomeDataUpdateCoordinator]` keyed by `subentry_id`.
 
 Type aliases (in `data.py`):
 
 ```python
-NapoleonBBQCoordinators = dict[str, NapoleonBBQDataUpdateCoordinator]
-NapoleonBBQConfigEntry = ConfigEntry[NapoleonBBQCoordinators]
+NapoleonHomeCoordinators = dict[str, NapoleonHomeDataUpdateCoordinator]
+NapoleonHomeConfigEntry = ConfigEntry[NapoleonHomeCoordinators]
 ```
 
 ## Core Components
@@ -105,14 +105,14 @@ NapoleonBBQConfigEntry = ConfigEntry[NapoleonBBQCoordinators]
 
 **Directory:** `coordinator/`
 
-> **Napoleon BBQ:** The coordinator holds a persistent BLE connection rather than polling an HTTP
-> API. The `NapoleonBBQBLEMixin` in `listeners.py` owns the full BLE lifecycle; `base.py` owns
+> **Napoleon Home:** The coordinator holds a persistent BLE connection rather than polling an HTTP
+> API. The `NapoleonHomeBLEMixin` in `listeners.py` owns the full BLE lifecycle; `base.py` owns
 > the periodic poll.
 
 **Package structure:**
 
-- `base.py` — `NapoleonBBQDataUpdateCoordinator`: inherits from `DataUpdateCoordinator[NapoleonBBQGrillState]` and `NapoleonBBQBLEMixin`. Manages the complete grill lifecycle: initial setup, periodic property polling, and clean shutdown.
-- `listeners.py` — `NapoleonBBQBLEMixin`: owns the entire BLE connection lifecycle (advertisement callback, connect, authenticate, GATT routing).
+- `base.py` — `NapoleonHomeDataUpdateCoordinator`: inherits from `DataUpdateCoordinator[NapoleonHomeGrillState]` and `NapoleonHomeBLEMixin`. Manages the complete grill lifecycle: initial setup, periodic property polling, and clean shutdown.
+- `listeners.py` — `NapoleonHomeBLEMixin`: owns the entire BLE connection lifecycle (advertisement callback, connect, authenticate, GATT routing).
 
 **Core functionality:**
 
@@ -130,13 +130,13 @@ NapoleonBBQConfigEntry = ConfigEntry[NapoleonBBQCoordinators]
 - `_on_notification()`: routes `oac`, `gpr`, `Odp`, `opr`, `ukn` opcodes
 - `_send_msg()`: fragments payload, serialises concurrent writes through an `asyncio.Lock`
 
-**Key class:** `NapoleonBBQDataUpdateCoordinator` (exported from `coordinator/__init__.py`)
+**Key class:** `NapoleonHomeDataUpdateCoordinator` (exported from `coordinator/__init__.py`)
 
 ### BLE Protocol
 
 **Directory:** `bluetooth/`
 
-> **Napoleon BBQ addition:** This package implements Ayla Local Control v2 over GATT and has no
+> **Napoleon Home addition:** This package implements Ayla Local Control v2 over GATT and has no
 > equivalent in the blueprint template.
 
 Implements Ayla Local Control v2 over GATT:
@@ -153,7 +153,7 @@ Implements Ayla Local Control v2 over GATT:
 
 **Directory:** `api/`
 
-> **Napoleon BBQ:** The API client is used **only at config-flow time**. At runtime the integration
+> **Napoleon Home:** The API client is used **only at config-flow time**. At runtime the integration
 > communicates exclusively over BLE.
 
 Handles all communication with the Ayla cloud API. Implements:
@@ -163,13 +163,13 @@ Handles all communication with the Ayla cloud API. Implements:
 - Per-device BLE `local_key` fetch (`async_get_local_key`, `async_refresh_local_keys`)
 - Error translation to custom exceptions
 
-**Key class:** `NapoleonBBQApiClient` (in `api/client.py`)
+**Key class:** `NapoleonHomeApiClient` (in `api/client.py`)
 
 ### Config Flow
 
 **Directory:** `config_flow_handler/`
 
-> **Napoleon BBQ:** Uses a hub/sub-entry model. Three flows are implemented rather than the single
+> **Napoleon Home:** Uses a hub/sub-entry model. Three flows are implemented rather than the single
 > user+reauth pattern in the blueprint template.
 
 Implements the configuration UI for adding and configuring the integration.
@@ -181,11 +181,11 @@ Implements the configuration UI for adding and configuring the integration.
 - `schemas/`: Voluptuous schemas for options forms
 - `subentry_flow.py`: Sub-entry flow — adds a grill to an existing account hub
 
-| Flow       | Handler                                | Purpose                                  |
-| ---------- | -------------------------------------- | ---------------------------------------- |
-| Main setup | `NapoleonBBQConfigFlowHandler`         | Create hub entry + first grill sub-entry |
-| Subentry   | `NapoleonBBQGrillSubentryFlowHandler`  | Add another grill to an existing hub     |
-| Reauth     | Step in `NapoleonBBQConfigFlowHandler` | Refresh `local_key` for all sub-entries  |
+| Flow       | Handler                                 | Purpose                                  |
+| ---------- | --------------------------------------- | ---------------------------------------- |
+| Main setup | `NapoleonHomeConfigFlowHandler`         | Create hub entry + first grill sub-entry |
+| Subentry   | `NapoleonHomeGrillSubentryFlowHandler`  | Add another grill to an existing hub     |
+| Reauth     | Step in `NapoleonHomeConfigFlowHandler` | Refresh `local_key` for all sub-entries  |
 
 Each setup run adds exactly one grill. The Ayla cloud API returns DSN + display name but not BLE MAC
 addresses, so MACs must be entered by the user (manual setup) or supplied by BLE advertisement
@@ -193,9 +193,9 @@ discovery.
 
 **Key classes:**
 
-- `NapoleonBBQConfigFlowHandler` (main flow, in `config_flow_handler/config_flow.py`)
-- `NapoleonBBQGrillSubentryFlowHandler` (sub-entry flow, in `config_flow_handler/subentry_flow.py`)
-- `NapoleonBBQOptionsFlow` (options, in `config_flow_handler/options_flow.py`)
+- `NapoleonHomeConfigFlowHandler` (main flow, in `config_flow_handler/config_flow.py`)
+- `NapoleonHomeGrillSubentryFlowHandler` (sub-entry flow, in `config_flow_handler/subentry_flow.py`)
+- `NapoleonHomeOptionsFlow` (options, in `config_flow_handler/options_flow.py`)
 
 ### Base Entity
 
@@ -208,18 +208,18 @@ Provides common functionality for all entities in the integration:
 - Coordinator integration
 - Availability tracking
 
-> **Napoleon BBQ:** Availability is gated on `coordinator.authenticated` (BLE authentication
+> **Napoleon Home:** Availability is gated on `coordinator.authenticated` (BLE authentication
 > state), not `last_update_success`. Individual entities may add further conditions (e.g., probe
 > connected bitmask).
 
-**Key class:** `NapoleonBBQEntity` (in `entity/base.py`)
+**Key class:** `NapoleonHomeEntity` (in `entity/base.py`)
 
 ### Grill State
 
-> **Napoleon BBQ addition:** Holds the live state received from the grill and has no equivalent in
+> **Napoleon Home addition:** Holds the live state received from the grill and has no equivalent in
 > the blueprint template.
 
-**File:** `data.py` — `NapoleonBBQGrillState`
+**File:** `data.py` — `NapoleonHomeGrillState`
 
 Holds the live state received from the grill. Updated by both:
 
@@ -243,7 +243,7 @@ Each platform (sensor, binary_sensor, switch, etc.) follows this pattern:
 Platform entities inherit from both:
 
 1. Home Assistant platform base (e.g., `SensorEntity`)
-2. `NapoleonBBQEntity` for common functionality
+2. `NapoleonHomeEntity` for common functionality
 
 Availability is gated on `coordinator.authenticated` (not `last_update_success`), with additional
 entity-specific conditions (e.g., probe connected bitmask for probe sensors).
@@ -254,7 +254,7 @@ entity-specific conditions (e.g., probe connected bitmask for probe sensors).
 BLE Advertisement (grill powers on)
          │
          ▼
-NapoleonBBQBLEMixin._on_advertisement
+NapoleonHomeBLEMixin._on_advertisement
          │ schedules
          ▼
 _connect_and_run → establish_connection → start_notify → _authenticate
@@ -266,7 +266,7 @@ _async_update_data (every 30 s)          _on_notification (push)
          │                                         │
          └──────────────┬──────────────────────────┘
                         ▼
-              NapoleonBBQGrillState.update_from_property
+              NapoleonHomeGrillState.update_from_property
                         │
               async_set_updated_data → entities update via coordinator
 ```
@@ -310,7 +310,7 @@ conventions.
 
 > [!NOTE]
 > The `blueprint.*` instruction files use generic placeholders and are synced from the upstream
-> template. Napoleon BBQ-specific patterns that diverge from the generic blueprint (BLE instead of
+> template. Napoleon Home-specific patterns that diverge from the generic blueprint (BLE instead of
 > HTTP, hub/subentry instead of single coordinator) are documented in `AGENTS.md`.
 
 > [!NOTE]
@@ -366,9 +366,9 @@ See [DECISIONS.md](./DECISIONS.md) for architectural and design decisions made d
 
 ### Adding a New Platform
 
-1. Create directory: `custom_components/napoleon_bbq/<platform>/`
+1. Create directory: `custom_components/napoleon_home/<platform>/`
 2. Implement `__init__.py` with `async_setup_entry()` — iterate `entry.runtime_data.items()` and call `async_add_entities(..., config_subentry_id=subentry_id)` for each coordinator
-3. Create entity classes inheriting from platform base + `NapoleonBBQEntity`
+3. Create entity classes inheriting from platform base + `NapoleonHomeEntity`
 4. Add platform to `PLATFORMS` in `const.py`
 
 ### Adding a New Service Action
@@ -379,19 +379,19 @@ See [DECISIONS.md](./DECISIONS.md) for architectural and design decisions made d
 
 ### Modifying Data Structure
 
-1. Update `NapoleonBBQGrillState` in `data.py`
+1. Update `NapoleonHomeGrillState` in `data.py`
 2. Update `_on_notification()` in `coordinator/listeners.py` to handle the new property opcode
 3. Add the property key to the `Gpr` poll list in `_async_update_data()` if polling is needed
 4. Update entity property implementations to read from the new state fields
 
 ### Modifying the BLE Protocol
 
-> **Napoleon BBQ addition:** Guidance for changes to the Ayla Local Control v2 BLE layer.
+> **Napoleon Home addition:** Guidance for changes to the Ayla Local Control v2 BLE layer.
 
-1. **New opcode** — Add a handler branch in `NapoleonBBQBLEMixin._on_notification()` in `coordinator/listeners.py`
+1. **New opcode** — Add a handler branch in `NapoleonHomeBLEMixin._on_notification()` in `coordinator/listeners.py`
 2. **New GATT characteristic** — Add the UUID constant to `const.py`; update `_connect_and_run()` in `coordinator/listeners.py` to subscribe or write to it
 3. **Framing or authentication changes** — Update `bluetooth/protocol.py`; the `_send_msg()` and `_on_notification()` methods in `coordinator/listeners.py` call into the protocol module
-4. **New property** — Add the property key constant to `const.py`; extend `NapoleonBBQGrillState` in `data.py`; follow "Modifying Data Structure" above
+4. **New property** — Add the property key constant to `const.py`; extend `NapoleonHomeGrillState` in `data.py`; follow "Modifying Data Structure" above
 
 ## Testing Strategy
 
