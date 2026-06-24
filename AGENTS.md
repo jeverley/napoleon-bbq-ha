@@ -10,7 +10,7 @@ This is a Home Assistant custom integration for Napoleon Prestige BBQ grills. Th
 
 - **Domain:** `napoleon_home`
 - **Title:** Napoleon Home
-- **Repository:** jeverley/napoleon-bbq-ha
+- **Repository:** jeverley/napoleon-home-ha
 
 **Key directories:**
 

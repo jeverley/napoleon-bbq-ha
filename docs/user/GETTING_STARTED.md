@@ -16,7 +16,7 @@ This guide will help you install and set up the Napoleon Home custom integration
 2. Go to "Integrations"
 3. Click the three dots in the top right corner
 4. Select "Custom repositories"
-5. Add this repository URL: `https://github.com/jeverley/napoleon-bbq-ha`
+5. Add this repository URL: `https://github.com/jeverley/napoleon-home-ha`
 6. Set category to "Integration"
 7. Click "Add"
 8. Find "Napoleon Home" in the integration list
@@ -25,7 +25,7 @@ This guide will help you install and set up the Napoleon Home custom integration
 
 ### Manual Installation
 
-1. Download the latest release from the [releases page](https://github.com/jeverley/napoleon-bbq-ha/releases)
+1. Download the latest release from the [releases page](https://github.com/jeverley/napoleon-home-ha/releases)
 2. Extract the `napoleon_home` folder from the archive
 3. Copy it to `custom_components/napoleon_home/` in your Home Assistant configuration directory
 4. Restart Home Assistant
@@ -181,11 +181,11 @@ Add this to `configuration.yaml`, restart, and reproduce the issue. Check logs f
 
 - See [CONFIGURATION.md](./CONFIGURATION.md) for detailed configuration options
 - See [EXAMPLES.md](./EXAMPLES.md) for more automation examples
-- Report issues at [GitHub Issues](https://github.com/jeverley/napoleon-bbq-ha/issues)
+- Report issues at [GitHub Issues](https://github.com/jeverley/napoleon-home-ha/issues)
 
 ## Support
 
 For help and discussion:
 
-- [GitHub Discussions](https://github.com/jeverley/napoleon-bbq-ha/discussions)
+- [GitHub Discussions](https://github.com/jeverley/napoleon-home-ha/discussions)
 - [Home Assistant Community Forum](https://community.home-assistant.io/)

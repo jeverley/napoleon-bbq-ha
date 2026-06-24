@@ -46,7 +46,7 @@ Each configured grill exposes the following entities:
 
 Click the button below to open the integration directly in HACS:
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jeverley&repository=napoleon-bbq-ha&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jeverley&repository=napoleon-home-ha&category=integration)
 
 Then click **Download** and **restart Home Assistant**.
 
@@ -111,7 +111,7 @@ Contributions are welcome! Please open an issue or pull request.
 
 **✨ Develop in the cloud:** Open this repository directly in GitHub Codespaces — no local setup required.
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jeverley/napoleon-bbq-ha?quickstart=1)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jeverley/napoleon-home-ha?quickstart=1)
 
 <details>
 <summary><strong>Local development setup</strong></summary>
@@ -157,12 +157,12 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-[commits-shield]: https://img.shields.io/github/commit-activity/y/jeverley/napoleon-bbq-ha.svg?style=for-the-badge
-[commits]: https://github.com/jeverley/napoleon-bbq-ha/commits/main
+[commits-shield]: https://img.shields.io/github/commit-activity/y/jeverley/napoleon-home-ha.svg?style=for-the-badge
+[commits]: https://github.com/jeverley/napoleon-home-ha/commits/main
 [hacs]: https://github.com/hacs/integration
 [hacsbadge]: https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge
-[license-shield]: https://img.shields.io/github/license/jeverley/napoleon-bbq-ha.svg?style=for-the-badge
+[license-shield]: https://img.shields.io/github/license/jeverley/napoleon-home-ha.svg?style=for-the-badge
 [maintenance-shield]: https://img.shields.io/badge/maintainer-%40jeverley-blue.svg?style=for-the-badge
-[releases-shield]: https://img.shields.io/github/release/jeverley/napoleon-bbq-ha.svg?style=for-the-badge
-[releases]: https://github.com/jeverley/napoleon-bbq-ha/releases
+[releases-shield]: https://img.shields.io/github/release/jeverley/napoleon-home-ha.svg?style=for-the-badge
+[releases]: https://github.com/jeverley/napoleon-home-ha/releases
 [user_profile]: https://github.com/jeverley
