@@ -91,6 +91,7 @@
   "customizations": {
     "vscode": {
       "extensions": [
+        "anthropic.claude-code",
         "charliermarsh.ruff",
         "davidanson.vscode-markdownlint",
         "EditorConfig.EditorConfig",
@@ -209,6 +210,10 @@
     // Named volume for node_modules: keeps it on Container FS (not bind mount) for performance.
     // Docker manages this volume separately from the workspace — npm ci runs fast on overlay FS.
     "source=${localWorkspaceFolderBasename}_node_modules,target=${containerWorkspaceFolder}/node_modules,type=volume",
+    // Named volume for Claude Code data: persists ~/.claude (sessions, preferences, project configs)
+    // across container rebuilds. Ownership is fixed by .devcontainer/hooks/on-create.post.sh (Docker
+    // initialises volume mount points as root). Use "Rebuild and Clean Volumes" to start fresh.
+    "source=${localWorkspaceFolderBasename}_claude_data,target=/home/vscode/.claude,type=volume",
     // Mount host gitconfig for local development (ignored in Codespaces)
     // In Codespaces, GitHub automatically configures Git with your account
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/home/vscode/.gitconfig.host,type=bind,consistency=cached,readonly"

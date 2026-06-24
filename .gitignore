@@ -20,6 +20,9 @@ node_modules/
 # AI agent temporary scratch files and planning notes
 .ai-scratch/
 
+# Claude Code local permission store (machine-specific, auto-generated)
+.claude/settings.local.json
+
 # Handover / research artefacts — may contain real credentials, never commit
 _handover/
 
