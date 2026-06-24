@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/jeverley/napoleon-home-ha/compare/v0.2.0...v0.2.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* update repo URLs to napoleon-home-ha after rename ([fca854a](https://github.com/jeverley/napoleon-home-ha/commit/fca854ad90c509daac6ab851c71aeb42b04dcd3e))
+
 ## [0.2.0](https://github.com/jeverley/napoleon-bbq-ha/compare/v0.1.3...v0.2.0) (2026-06-24)
 
 
