@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/jeverley/napoleon-home-ha/compare/v0.2.1...v0.2.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **ble:** pair before subscribing to establish encrypted link ([12c92b3](https://github.com/jeverley/napoleon-home-ha/commit/12c92b3cdcd804c2aac26025e2fafe8623a45b31))
+
 ## [0.2.1](https://github.com/jeverley/napoleon-home-ha/compare/v0.2.0...v0.2.1) (2026-06-24)
 
 
