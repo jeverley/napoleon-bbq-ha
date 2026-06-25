@@ -242,8 +242,15 @@ class NapoleonHomeBLEMixin:
             # if it races this window, and so immediate Odp ACKs from start_notify
             # can be sent via _send_msg.
             self._client = client
-            paired = await client.pair()
-            LOGGER.debug("Napoleon Home %s: BLE paired (result=%s)", self._mac, paired)
+            try:
+                paired = await client.pair()
+                LOGGER.debug("Napoleon Home %s: BLE paired (result=%s)", self._mac, paired)
+            except Exception as pair_exc:  # noqa: BLE001
+                LOGGER.warning(
+                    "Napoleon Home %s: BLE pair() failed (non-fatal, link may already be encrypted): %s",
+                    self._mac,
+                    pair_exc,
+                )
             await asyncio.sleep(ENCRYPT_SETTLE)
             await client.start_notify(OUTBOX_UUID, self._on_notification)
             self._mtu = client.mtu_size
