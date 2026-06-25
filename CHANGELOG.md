@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/jeverley/napoleon-home-ha/compare/v0.2.2...v0.2.3) (2026-06-25)
+
+
+### Bug Fixes
+
+* **ble:** treat pair() failure as non-fatal warning ([443d782](https://github.com/jeverley/napoleon-home-ha/commit/443d78230a31b60dc719a6a1dec654635355fa23))
+
 ## [0.2.2](https://github.com/jeverley/napoleon-home-ha/compare/v0.2.1...v0.2.2) (2026-06-25)
 
 
