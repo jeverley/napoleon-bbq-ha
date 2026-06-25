@@ -372,15 +372,27 @@ class NapoleonHomeBLEMixin:
             raw: Raw bytes from the indication.
 
         """
+        LOGGER.debug(
+            "Napoleon Home %s: RX %d bytes: %s",
+            self._mac,
+            len(raw),
+            raw.hex(),
+        )
         complete = self._assembler.feed(bytes(raw))
         if complete is None:
+            LOGGER.debug("Napoleon Home %s: RX fragment — awaiting more chunks", self._mac)
             return
 
         msg = decode_msg(complete)
         if msg is None:
-            LOGGER.debug("Received non-JSON outbox data from Napoleon Home %s", self._mac)
+            LOGGER.debug(
+                "Napoleon Home %s: RX non-JSON data: %s",
+                self._mac,
+                complete.hex(),
+            )
             return
 
+        LOGGER.debug("Napoleon Home %s: RX msg: %s", self._mac, msg)
         opcode = msg.get("o")
         seq: int = msg.get("i", 0)
         payload: dict[str, Any] = msg.get("p") or {}
@@ -448,6 +460,12 @@ class NapoleonHomeBLEMixin:
 
         """
         response = compute_hmac(self._local_key, challenge_b64)
+        LOGGER.debug(
+            "Napoleon Home %s: HMAC response computed (challenge=%s, response=%s)",
+            self._mac,
+            challenge_b64,
+            response,
+        )
         await self._send_msg("Oac", {"t": 2, "r": response})
 
     async def _send_msg(
