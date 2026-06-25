@@ -242,6 +242,8 @@ class NapoleonHomeBLEMixin:
             # if it races this window, and so immediate Odp ACKs from start_notify
             # can be sent via _send_msg.
             self._client = client
+            paired = await client.pair()
+            LOGGER.debug("Napoleon Home %s: BLE paired (result=%s)", self._mac, paired)
             await asyncio.sleep(ENCRYPT_SETTLE)
             await client.start_notify(OUTBOX_UUID, self._on_notification)
             self._mtu = client.mtu_size
@@ -495,7 +497,7 @@ class NapoleonHomeBLEMixin:
             # exception handler in _connect_and_run between chunk iterations.
             ble_client = self._client
             for chunk in chunks:
-                await ble_client.write_gatt_char(INBOX_UUID, chunk, response=True)
+                await ble_client.write_gatt_char(INBOX_UUID, chunk, response=False)
 
     async def _poll_properties(self) -> None:
         """
