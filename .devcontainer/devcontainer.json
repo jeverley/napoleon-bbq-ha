@@ -75,8 +75,10 @@
         "ripgrep",
         "shellcheck",
         "shfmt",
+        "bluez",
         "sqlite3",
         "tree",
+        "usbutils",
         "yamllint"
       ]
     }
@@ -215,7 +217,10 @@
     "source=${localWorkspaceFolderBasename}_claude_data,target=/home/vscode/.claude,type=volume",
     // Mount host gitconfig for local development (ignored in Codespaces)
     // In Codespaces, GitHub automatically configures Git with your account
-    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/home/vscode/.gitconfig.host,type=bind,consistency=cached,readonly"
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/home/vscode/.gitconfig.host,type=bind,consistency=cached,readonly",
+    // Mount WSL2 host D-Bus system socket so bleak can reach the host's bluetoothd (which owns hci0).
+    // Requires bluetoothd running on the WSL2 host; container must not run its own daemon.
+    "source=/var/run/dbus/system_bus_socket,target=/var/run/dbus/system_bus_socket,type=bind"
   ],
   "remoteUser": "vscode",
   // Bluetooth USB passthrough support (usbipd-win → WSL2 → container)
