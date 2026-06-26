@@ -221,5 +221,5 @@
   // Bluetooth USB passthrough support (usbipd-win → WSL2 → container)
   "privileged": true,
   "capAdd": ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"],
-  "runArgs": ["--device=/dev/bus/usb"]
+  "runArgs": ["--network=host", "--device=/dev/bus/usb"]
 }
