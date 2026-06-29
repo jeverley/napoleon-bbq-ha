@@ -348,7 +348,7 @@ python3 -m script.scaffold config_flow_oauth2     # OAuth2 flow
 - Implement in `config_flow_handler/` package
 - Support user setup, discovery, reauth, reconfigure
 - Always set unique_id for discovered entries
-- **Design:** each setup run adds exactly one grill. The Ayla cloud API returns DSN + display name but not BLE MAC addresses, so MACs must be either user-entered (manual setup) or supplied by BLE advertisement discovery. The `pick_device` screen is shown only when an account has multiple unconfigured grills.
+- **Design:** setup is BLE-discovery only — `async_step_user` aborts with `discovery_required`. The grill must be advertising when setup begins. The flow probes provisioning state via BLE (`_async_probe_ble`) and reads the DSN from the open GATT DUID characteristic (`00000001-fe28`) during the same connection. Routes through `provision_guide` / `factory_reset_guide` as needed before reaching `key_retrieval` (credentials form). Device matching uses DSN (from GATT read) falling back to fuzzy MAC offset matching.
 
 See `.github/instructions/blueprint.config_flow.instructions.md` for comprehensive patterns.
 
@@ -363,17 +363,18 @@ See `.github/instructions/blueprint.config_flow.instructions.md` for comprehensi
 
 - Protocol: Ayla Local Control v2 (JSON over GATT, HMAC-SHA256 auth) — see `bluetooth/protocol.py`
 - Characteristics: Inbox `01000001-fe28-435b-991a-f1b21bb9bcd0` (write), Outbox `01000002-fe28-435b-991a-f1b21bb9bcd0` (notify)
-- Auth flow: app sends `Oac t:1`, grill replies with nonce, app computes HMAC and sends `Oac t:2`, grill confirms
-- Poll: send `Gpr {"n": "<property>"}` → grill replies with `gpr {"n": ..., "v": ...}` (no ACK needed)
+- Auth flow: app sends `Oac t:1` with `"i":"android.user@email.com"` (fixed constant, not the account email), grill replies with nonce or `s:6` (not provisioned), app computes HMAC and sends `Oac t:2`, grill confirms (`oac t:2` with no `s` field = accepted; `s:4` = wrong HMAC)
+- Poll: send `Gpr {"n": "<property>"}` → grill replies with `gpr {"n": ..., "v": ..., "t": <type>}` (type code also present in response; no ACK needed)
 - Push: grill sends `Odp {"n": ..., "v": ..., "e": 1, "t": <type>}` → app ACKs with `odp` (same `i`, name only); coordinator calls `async_set_updated_data` immediately
 - Write: send `Opr {"n": ..., "t": <type_code>, "v": <value>}` → grill replies with `opr`; `ukn {"o":"ukn","i":N,"s":3}` means invalid command (uses `s` not `p`)
 - Ayla type codes for `t` field in `Opr`/`gpr`/`Odp`: `0`=int, `1`=decimal, `3`=bool, `4`=string
 - **Odp/WiFi interaction (critical):** when grill has active WiFi/MQTT, it does NOT push `PRB_TMP_*` temperatures via BLE — they go via MQTT to Ayla cloud instead. State-change pushes (`PRB_STAT`, `TUNIT`, `LCD_OFF` etc.) still arrive over BLE. This is why `Gpr` polling at 30 s is required for temperature values in normal home use.
-- Connection lifecycle: `_connecting: bool` flag prevents concurrent `_connect_and_run` tasks from rapid re-advertisements; on disconnect `_on_disconnect` re-registers the advertisement callback so the coordinator reconnects when the grill powers on again; `_circuit_open: bool` is set after `MAX_CONNECT_FAILURES` to permanently suppress re-registration until entry reload
-- Failure cap: after `MAX_CONNECT_FAILURES = 5` consecutive advertisement-level failures in `_connect_and_run`, `_circuit_open` is set and auto-reconnect stops until the config entry is reloaded; `_connect_failures` resets to 0 after a successful authentication
+- Connection lifecycle: startup always waits for a genuine advertisement — `_async_setup` calls `_register_bt_callback` directly (no cached-device fast-path); `async_register_callback` fires immediately with HA's bluetooth history, so `_skip_history_replay` suppresses that synchronous replay and requires a real new advertisement to trigger a connect; `_connecting: bool` flag prevents concurrent `_connect_and_run` tasks from rapid re-advertisements; on disconnect `_on_disconnect` re-registers the advertisement callback; `_circuit_open: bool` is set after `MAX_CONNECT_FAILURES` to permanently suppress re-registration until entry reload
+- Failure cap: `BleakNotFoundError`/`TimeoutError` from `establish_connection` (e.g. grill busy with another app) are caught before the outer failure counter and do not increment `_connect_failures`; `_connect_failures` resets to 0 after successful authentication **and** on clean disconnect from an authenticated session (so a powered-off grill doesn't accumulate failures toward the circuit breaker)
 - Library: `bleak-retry-connector` (`establish_connection` with `max_attempts=1` + `BleakClientWithServiceCache`); `establish_connection` handles slot-draining via `wait_for_disconnect` and error classification before raising; outer retry is per-advertisement-event via `_connect_failures`
 - `habluetooth` always injects FAST connection params (7.5 ms interval) via `HaBleakClient.connect()` regardless of the call path — this is expected HA behaviour, not a bug
-- No BLE-layer bonding or encryption required (confirmed by hardware test); HMAC-SHA256 is the only auth gate
+- **BLE bonding required:** INBOX writes require an encrypted link from a bonded peer (ATT error 0x05 otherwise). The integration calls `client.pair()` (with exception swallowing for already-bonded devices) before `start_notify`. On the first setup the host must bond before the Napoleon app provisions WiFi, to secure a grill bond slot.
+- **HMAC formula (confirmed by hardware test):** `HMAC-SHA256(key=local_key.encode("utf-8"), msg=b"response" + base64.b64decode(challenge_b64))`. The key is the raw local_key string encoded as UTF-8 — do NOT base64-decode it. A wrong HMAC causes the grill to return `s:4` on the `oac t:2` response and `s:3` on all subsequent `Gpr` requests.
 
 **Prestige property sentinels and bitmasks:**
 
@@ -382,7 +383,9 @@ See `.github/instructions/blueprint.config_flow.instructions.md` for comprehensi
 - `TNK_WT` = `-14400` when gas tank not configured
 - `PRB_TMP_FOUR` quirk: Prestige IF2 has 3 physical probe sockets; probe 4 reads 0.0 at ambient while physical probes read ~24 °C — may be an internal grill thermistor that only reports values when the burner heats the hood above ambient (unconfirmed)
 
-**GATT readable characteristics (service `0000fe28`, readable without auth):**
+**GATT readable characteristics (service `0000fe28`):**
+
+Open (readable without bond):
 
 | Short UUID      | APK name                     | Example value                                              |
 | --------------- | ---------------------------- | ---------------------------------------------------------- |
@@ -390,7 +393,12 @@ See `.github/instructions/blueprint.config_flow.instructions.md` for comprehensi
 | `00000002-fe28` | `GATT_CHAR_OEM_ID`           | `"146516a1"` (Napoleon's Ayla OEM ID — not used in crypto) |
 | `00000003-fe28` | `GATT_CHAR_OEM_MODEL`        | `"thermometer-mqtt-eu"` (EU); `"thermometer-mqtt-us"` (US) |
 | `00000004-fe28` | `GATT_CHAR_TEMPLATE_VERSION` | `"v3.0.19"` (firmware)                                     |
-| `00000006-fe28` | `GATT_CHAR_DISPLAY_NAME`     | `"Prestige-1F2"`                                           |
+
+Requires bond (ATT 0x05 without an active encrypted session):
+
+| Short UUID      | APK name                 | Example value    |
+| --------------- | ------------------------ | ---------------- |
+| `00000006-fe28` | `GATT_CHAR_DISPLAY_NAME` | `"Prestige-1F2"` |
 
 **Prestige property name reference (confirmed from APK — `NapProperty.PRESTIGE`):**
 
@@ -414,15 +422,22 @@ Timers:
 
 Settings:
 
-| Property     | Meaning                                    |
-| ------------ | ------------------------------------------ |
-| `TUNIT`      | Temperature unit (0=Celsius, 1=Fahrenheit) |
-| `BSMODE`     | Battery/screen saver mode (0=off, 1=on)    |
-| `LCD_OFF`    | Knob backlights off (1=off)                |
-| `BRT_LVL`    | Brightness level                           |
-| `AUTO_T_OUT` | Auto timeout                               |
-| `DEVC_NME`   | Device name                                |
-| `TOFF`       | Turn off                                   |
+| Property     | Meaning                                     |
+| ------------ | ------------------------------------------- |
+| `TUNIT`      | Temperature unit (0=Celsius, 1=Fahrenheit)  |
+| `BSMODE`     | Display power save (0=off, 1=on)            |
+| `LCD_OFF`    | Knob lights off (0=on, 1=off)               |
+| `BRT_LVL`    | Display brightness (1=low, 3=mid, 5=high)   |
+| `AUTO_T_OUT` | Auto-shutoff timeout (grill stores minutes) |
+| `DEVC_NME`   | Device name                                 |
+| `TOFF`       | Turn off                                    |
+
+Notes:
+
+- `BSMODE`: grill resets to 0 on every **power cycle** (confirmed by hardware test); persists across BLE-only disconnects; coordinator stores `_bsmode_desired`, writes it post-auth, and re-asserts on `Odp BSMODE=0`
+- `LCD_OFF`: logic inverted from name (0=on, 1=off)
+- `BRT_LVL`: 0 is an invalid residual value — mapped to "low" on read, only 1/3/5 are written
+- `AUTO_T_OUT`: stored in minutes by the grill; HA entity converts ÷60 on read, ×60 on write (range 1–24 h)
 
 Gas tank:
 
@@ -444,14 +459,14 @@ Probe / cook names:
 
 System / misc:
 
-| Property            | Meaning           |
-| ------------------- | ----------------- |
-| `version`           | Firmware version  |
-| `oem_host_version`  | OEM host version  |
-| `RSSI`              | RSSI value        |
-| `BT_LVL`            | Battery level     |
-| `RST_CNT`           | Reset count       |
-| `battery_low_alert` | Battery low alert |
+| Property            | Meaning                          |
+| ------------------- | -------------------------------- |
+| `version`           | Firmware version                 |
+| `oem_host_version`  | OEM host version                 |
+| `RSSI`              | RSSI value                       |
+| `BT_LVL`            | Battery level (0–5 bar; ×20 = %) |
+| `RST_CNT`           | Reset count                      |
+| `battery_low_alert` | Battery low alert                |
 
 See `.github/instructions/blueprint.coordinator.instructions.md` and `.github/instructions/blueprint.api.instructions.md` for details.
 

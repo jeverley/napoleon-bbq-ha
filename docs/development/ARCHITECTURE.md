@@ -21,7 +21,9 @@ custom_components/napoleon_home/
 │
 ├── bluetooth/                    # Ayla Local Control v2 BLE protocol (Napoleon Home addition)
 │   ├── __init__.py
-│   └── protocol.py               # Framing, HMAC-SHA256, JSON encode/decode
+│   ├── errors.py                 # NapoleonHomeNotProvisionedError, NapoleonHomeAlreadyBondedError
+│   ├── protocol.py               # Framing, HMAC-SHA256, JSON encode/decode
+│   └── session.py                # NapoleonHomeBLESession (connect, auth, read_dsn)
 │
 ├── coordinator/                  # BLE DataUpdateCoordinator
 │   ├── __init__.py
@@ -178,7 +180,7 @@ Implements the configuration UI for adding and configuring the integration.
 
 **Structure:**
 
-- `config_flow.py`: Main flow — BLE discovery, user setup, reauth; creates the hub entry
+- `config_flow.py`: Main flow — BLE-first discovery, reauth; creates the hub entry
 - `options_flow.py`: Options flow for poll interval configuration
 - `schemas/`: Voluptuous schemas for options forms
 - `subentry_flow.py`: Sub-entry flow — adds a grill to an existing account hub
@@ -189,9 +191,11 @@ Implements the configuration UI for adding and configuring the integration.
 | Subentry   | `NapoleonHomeGrillSubentryFlowHandler`  | Add another grill to an existing hub     |
 | Reauth     | Step in `NapoleonHomeConfigFlowHandler` | Refresh `local_key` for all sub-entries  |
 
-Each setup run adds exactly one grill. The Ayla cloud API returns DSN + display name but not BLE MAC
-addresses, so MACs must be entered by the user (manual setup) or supplied by BLE advertisement
-discovery.
+Setup is **BLE-discovery only** (`async_step_user` aborts with `discovery_required`). The flow
+probes provisioning state (`_async_probe_ble`) immediately on advertisement and routes through
+`provision_guide` / `factory_reset_guide` before reaching `key_retrieval` (credentials form).
+Device matching in `key_retrieval` uses the DSN read from the open GATT DUID characteristic
+during `_async_probe_ble` (`session.read_dsn()`), falling back to fuzzy MAC offset variants.
 
 **Key classes:**
 

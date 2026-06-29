@@ -19,6 +19,10 @@ from typing import Any, Self
 from bleak.backends.device import BLEDevice
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
+from custom_components.napoleon_home.bluetooth.errors import (
+    NapoleonHomeAlreadyBondedError,
+    NapoleonHomeNotProvisionedError,
+)
 from custom_components.napoleon_home.bluetooth.protocol import (
     NapoleonHomeOutboxAssembler,
     compute_hmac,
@@ -32,6 +36,7 @@ from custom_components.napoleon_home.const import (
     BLE_AUTH_STATUS_NOT_PROVISIONED,
     BLE_AUTH_STATUS_REJECTED,
     DOMAIN,
+    DSN_UUID,
     INBOX_UUID,
     LOGGER,
     OUTBOX_UUID,
@@ -254,8 +259,8 @@ class NapoleonHomeBLESession:
 
         - ``s:6`` at the top level of the ``oac`` response → ``False`` (not provisioned).
         - ``p.t == 1`` with a challenge field → ``True`` (provisioned, challenge ready).
-        - ATT 0x05 (Insufficient Authentication) on write → ``True`` (bonding disabled
-          after provisioning).
+        - ATT 0x05 (Insufficient Authentication) on write → raises
+          ``NapoleonHomeAlreadyBondedError`` (grill bonded to another device; can't write).
         - Timeout or any other error → ``None`` (unknown; caller should not block setup).
 
         """
@@ -277,9 +282,11 @@ class NapoleonHomeBLESession:
             return await asyncio.wait_for(result_queue.get(), timeout=AUTH_TIMEOUT)
         except TimeoutError:
             return None
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             if _is_att_insufficient_auth(err):
-                return True  # bonding disabled = provisioned
+                raise NapoleonHomeAlreadyBondedError(
+                    f"Napoleon Home {self._mac}: grill refuses bond (ATT 0x05)"
+                ) from err
             return None
         finally:
             self.unregister_handler("oac", _oac_handler)
@@ -295,17 +302,13 @@ class NapoleonHomeBLESession:
         Raises:
             NapoleonHomeNotProvisionedError: Grill replies ``s:6`` (top-level) —
                 grill has not been set up via the Napoleon app yet.
+            NapoleonHomeAlreadyBondedError: Grill refuses writes with ATT 0x05 —
+                bonded to another device; factory reset required.
             ConfigEntryAuthFailed: Grill rejects the HMAC response (``s:4`` on
                 ``oac t:2``) — local key has rotated; trigger reauthentication.
             TimeoutError: No response within ``AUTH_TIMEOUT``.
 
         """
-        # Deferred import to avoid a module-level circular dependency:
-        # bluetooth.session → config_flow_handler.validate → (no bluetooth import after cleanup)
-        from custom_components.napoleon_home.config_flow_handler.validate import (  # noqa: PLC0415
-            NapoleonHomeNotProvisionedError,
-        )
-
         auth_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=4)
 
         def _oac_handler(msg: dict[str, Any]) -> None:
@@ -369,12 +372,23 @@ class NapoleonHomeBLESession:
 
             LOGGER.debug("Napoleon Home %s: unexpected auth message: %s", self._mac, first)
 
-        except NapoleonHomeNotProvisionedError, ConfigEntryAuthFailed, TimeoutError:
+        except NapoleonHomeNotProvisionedError, NapoleonHomeAlreadyBondedError, ConfigEntryAuthFailed, TimeoutError:
             raise
         except Exception as err:
+            if _is_att_insufficient_auth(err):
+                raise NapoleonHomeAlreadyBondedError(
+                    f"Napoleon Home {self._mac}: grill refuses bond (ATT 0x05)"
+                ) from err
             raise TimeoutError(f"Napoleon Home {self._mac}: BLE auth error — {err}") from err
         finally:
             self.unregister_handler("oac", _oac_handler)
+
+    async def read_dsn(self) -> str | None:
+        """Read DSN from GATT DUID characteristic (no bond required)."""
+        if self._client is None:
+            return None
+        data = await self._client.read_gatt_char(DSN_UUID)
+        return data.decode("utf-8").strip("\x00").strip() or None
 
     # ── Context manager ──────────────────────────────────────────────────────
 

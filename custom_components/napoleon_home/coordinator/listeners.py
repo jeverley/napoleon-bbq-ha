@@ -26,7 +26,11 @@ from typing import TYPE_CHECKING, Any
 from bleak.backends.device import BLEDevice
 from bleak_retry_connector import BleakClientWithServiceCache, BleakNotFoundError
 
-from custom_components.napoleon_home.bluetooth import NapoleonHomeBLESession
+from custom_components.napoleon_home.bluetooth import (
+    NapoleonHomeAlreadyBondedError,
+    NapoleonHomeBLESession,
+    NapoleonHomeNotProvisionedError,
+)
 from custom_components.napoleon_home.const import LOGGER, MAX_CONNECT_FAILURES, POLL_PROPS, PROP_BSMODE, PROP_TYPE_BOOL
 from homeassistant.components.bluetooth import (
     BluetoothChange,
@@ -190,11 +194,6 @@ class NapoleonHomeBLEMixin:
             device: The ``BLEDevice`` to connect to.
 
         """
-        # Deferred import to avoid a module-level circular dependency.
-        from custom_components.napoleon_home.config_flow_handler.validate import (  # noqa: PLC0415
-            NapoleonHomeNotProvisionedError,
-        )
-
         if self._connecting or self.connected:
             return
         self._connecting = True
@@ -239,7 +238,6 @@ class NapoleonHomeBLEMixin:
             # Auth succeeded.
             self._authenticated = True
             self._connect_failures = 0
-            LOGGER.debug("Napoleon Home %s: authenticated", self._mac)
             self.update_interval = timedelta(seconds=self._poll_interval)
             self.config_entry.async_create_background_task(
                 self.hass,
@@ -271,6 +269,23 @@ class NapoleonHomeBLEMixin:
                 self._mac,
             )
             self.config_entry.async_start_reauth(self.hass)
+            if self._session is not None:
+                session_ref = self._session
+                self._session = None
+                self._authenticated = False
+                with contextlib.suppress(Exception):
+                    await session_ref.disconnect()
+            else:
+                self._on_disconnect(None)
+            return
+
+        except NapoleonHomeAlreadyBondedError:
+            LOGGER.error(
+                "Napoleon Home %s: grill is bonded to another device (ATT 0x05) — "
+                "factory reset the grill and reload this integration entry to reconnect",
+                self._mac,
+            )
+            self._circuit_open = True
             if self._session is not None:
                 session_ref = self._session
                 self._session = None

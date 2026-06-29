@@ -13,11 +13,14 @@ For more information on the Ayla BLE protocol:
 See _handover/CLAUDE.md — Protocol section.
 """
 
+from .errors import NapoleonHomeAlreadyBondedError, NapoleonHomeNotProvisionedError
 from .protocol import NapoleonHomeOutboxAssembler, compute_hmac, decode_msg, encode_inbox, make_msg
 from .session import NapoleonHomeBLESession
 
 __all__ = [
+    "NapoleonHomeAlreadyBondedError",
     "NapoleonHomeBLESession",
+    "NapoleonHomeNotProvisionedError",
     "NapoleonHomeOutboxAssembler",
     "compute_hmac",
     "decode_msg",

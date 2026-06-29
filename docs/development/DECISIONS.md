@@ -188,6 +188,38 @@ temperature values.
 
 ---
 
+### BLE-First Config Flow (Bond-Before-Provision)
+
+**Date:** 2026-06-29
+
+**Context:** The grill's BLE bond table is first-come-first-served. Once the Napoleon app
+provisions WiFi and permanently switches to MQTT, the app holds a bond slot. If the app bonds
+first, HA may face ATT 0x05 (Insufficient Authentication) on INBOX writes — permanently, until
+a factory reset. The previous flow collected API credentials first, which wasted the bonding
+window available before provisioning.
+
+**Decision:** Bond before credentials. `async_step_bluetooth` immediately calls `_async_probe_ble`
+(connect + `client.pair()` + `check_provisioned()`) before showing any form. Manual setup
+(`async_step_user`) aborts with `discovery_required` — the grill must be advertising.
+
+**Rationale:**
+
+- HA secures a bond slot before the user provisions via the Napoleon app
+- DSN is read from the open GATT DUID characteristic (char `00000001-fe28`) during the
+  `_async_probe_ble` connection, with no separate BLE round-trip needed
+- Provisioning state (s:6 / challenge / ATT 0x05) determines the next step without API calls
+- `async_step_key_retrieval` only runs after BLE confirms provisioned — local key exists in Ayla
+  only after provisioning, so API calls before this point would fail anyway
+
+**Consequences:**
+
+- `async_step_user` is a stub that aborts — integration cannot be added manually
+- `async_step_pick_device` removed — DSN or fuzzy MAC matching replaces it
+- `_async_finish` simplified to BLE auth + entry creation only (no provisioning probe, no key fetch)
+- `_async_resolve_valid_mac` simplified — no BLE probe, just candidate discovery + connectable filter
+
+---
+
 ## Future Considerations
 
 ### State Restoration
