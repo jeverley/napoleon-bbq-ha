@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/jeverley/napoleon-home-ha/compare/v0.3.1...v0.3.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **napoleon_home:** fix AlreadyBonded circuit breaker, key_retrieval form, factory_reset routing, DSN read; remove silent-add ([73d0c62](https://github.com/jeverley/napoleon-home-ha/commit/73d0c629e69929057cbccd607dab8dd8e69cb437))
+
 ## [0.3.1](https://github.com/jeverley/napoleon-home-ha/compare/v0.3.0...v0.3.1) (2026-06-29)
 
 
