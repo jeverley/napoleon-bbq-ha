@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/jeverley/napoleon-home-ha/compare/v0.3.0...v0.3.1) (2026-06-29)
+
+
+### Features
+
+* **napoleon_home:** shared BLE session, fix s:6 detection, wire provision_guide ([1342d7b](https://github.com/jeverley/napoleon-home-ha/commit/1342d7ba166842d766c14994c8c375f620d35cac))
+
 ## [0.3.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.2.3...v0.3.0) (2026-06-29)
 
 
