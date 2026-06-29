@@ -24,7 +24,7 @@ Each configured grill exposes the following entities:
 
 | Platform        | Entity                   | Description                              |
 | --------------- | ------------------------ | ---------------------------------------- |
-| `binary_sensor` | Connectivity             | Whether the grill is reachable over BLE  |
+| `binary_sensor` | Status                   | Whether the grill is reachable over BLE  |
 | `binary_sensor` | Battery saver mode       | Display battery saver mode (diagnostic)  |
 | `sensor`        | Probe 1–3 + Grill        | Live temperature readings                |
 | `sensor`        | Battery                  | Controller battery level                 |

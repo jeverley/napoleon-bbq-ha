@@ -39,8 +39,9 @@ _REMOVED_ENTITY_KEYS: tuple[tuple[str, str], ...] = (
     ("switch", "display_power_save"),
     # display_power_save diagnostic sensor migrated to binary_sensor
     ("sensor", "display_power_save"),
-    # connected binary sensor renamed to connectivity
+    # connected binary sensor renamed to connectivity, then to status
     ("binary_sensor", "connected"),
+    ("binary_sensor", "connectivity"),
     # turn_off button renamed to power_off
     ("button", "turn_off"),
     # renamed keys to match current naming

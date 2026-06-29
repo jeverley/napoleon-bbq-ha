@@ -110,8 +110,8 @@
       "battery_saver_mode": {
         "name": "Battery saver mode"
       },
-      "connectivity": {
-        "name": "Connectivity"
+      "status": {
+        "name": "Status"
       }
     },
     "sensor": {
