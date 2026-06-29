@@ -348,7 +348,7 @@ python3 -m script.scaffold config_flow_oauth2     # OAuth2 flow
 - Implement in `config_flow_handler/` package
 - Support user setup, discovery, reauth, reconfigure
 - Always set unique_id for discovered entries
-- **Design:** setup is BLE-discovery only — `async_step_user` aborts with `discovery_required`. The grill must be advertising when setup begins. The flow probes provisioning state via BLE (`_async_probe_ble`) and reads the DSN from the open GATT DUID characteristic (`00000001-fe28`) during the same connection. Routes through `provision_guide` / `factory_reset_guide` as needed before reaching `key_retrieval` (credentials form). Device matching uses DSN (from GATT read) falling back to fuzzy MAC offset matching.
+- **Design:** setup is BLE-discovery only — `async_step_user` aborts with `discovery_required`. The grill must be advertising when setup begins. The flow probes provisioning state via BLE (`_async_probe_ble`) and reads the DSN from the open GATT DUID characteristic (`00000001-fe28`) during the same connection. Routes through `provision_guide` / `factory_reset_guide` as needed before reaching `key_retrieval` (credentials form). Device matching uses DSN (from GATT read) when known; otherwise every account device's key is tried via real BLE auth until one is accepted by the grill.
 
 See `.github/instructions/blueprint.config_flow.instructions.md` for comprehensive patterns.
 

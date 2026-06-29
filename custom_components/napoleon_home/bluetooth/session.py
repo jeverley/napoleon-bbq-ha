@@ -387,7 +387,17 @@ class NapoleonHomeBLESession:
         """Read DSN from GATT DUID characteristic (no bond required)."""
         if self._client is None:
             return None
-        data = await self._client.read_gatt_char(DSN_UUID)
+        try:
+            data = await self._client.read_gatt_char(DSN_UUID)
+        except Exception as err:
+            LOGGER.debug(
+                "Napoleon Home %s: DSN read of %s failed (%s): %s",
+                self._mac,
+                DSN_UUID,
+                type(err).__name__,
+                err,
+            )
+            raise
         return data.decode("utf-8").strip("\x00").strip() or None
 
     # ── Context manager ──────────────────────────────────────────────────────
