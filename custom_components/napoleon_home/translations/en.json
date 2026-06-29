@@ -1,20 +1,13 @@
 {
   "config": {
     "step": {
-      "user": {
+      "key_retrieval": {
         "title": "Connect to Napoleon Home",
-        "description": "Enter your Napoleon app account credentials to connect your Napoleon Home account. The grill must be registered in the Napoleon app and discoverable via Bluetooth during setup.{name}",
+        "description": "Enter your Napoleon app account credentials to retrieve the local key for **{name}**.",
         "data": {
           "username": "Email",
           "password": "Password",
           "region": "Region"
-        }
-      },
-      "pick_device": {
-        "title": "Select grill",
-        "description": "Multiple Napoleon Prestige grills were found in your account. Select the one to configure.",
-        "data": {
-          "dsn": "Grill"
         }
       },
       "factory_reset_guide": {
@@ -26,11 +19,6 @@
         "title": "Provision your grill",
         "description": "**{name}** hasn't been set up yet.\n\n1. Open the **Napoleon** app on your phone\n2. Add and provision the grill (follow the in-app instructions)\n3. Once setup is complete, **close the Napoleon app**\n4. Return here and tap **Continue**",
         "submit": "Continue"
-      },
-      "auto_add_confirm": {
-        "title": "Add grill",
-        "description": "A Napoleon Prestige grill **{name}** was found in your account. Add it to Home Assistant?",
-        "submit": "Add grill"
       },
       "reauth_confirm": {
         "title": "Re-authenticate Napoleon Home",
@@ -50,11 +38,13 @@
       "ble_not_provisioned": "Grill is not provisioned — please complete setup in the Napoleon app first.",
       "ble_discovery_required": "Couldn't determine the grill Bluetooth address. Start setup from Bluetooth discovery by powering on the grill and adding it when detected.",
       "ble_key_rejected": "BLE key rejected by grill — the local key may have rotated. Try reauthenticating.",
+      "reset_not_detected": "Grill is still bonded to another device. Confirm the factory reset completed (hold ignition ~10 s until the grill beeps) then try again.",
       "unknown": "Unexpected error. Check the Home Assistant logs for details."
     },
     "abort": {
       "already_configured": "This Napoleon Home grill is already configured.",
-      "device_added_to_account": "The Napoleon Home grill has been added to your existing account."
+      "device_added_to_account": "The Napoleon Home grill has been added to your existing account.",
+      "discovery_required": "This integration can only be added via Bluetooth discovery. Power on your grill and it will appear automatically."
     }
   },
   "config_subentries": {
