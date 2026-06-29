@@ -214,7 +214,8 @@ window available before provisioning.
 **Consequences:**
 
 - `async_step_user` is a stub that aborts — integration cannot be added manually
-- `async_step_pick_device` removed — DSN or fuzzy MAC matching replaces it
+- `async_step_pick_device` removed — DSN matching (or trying every account device's key via
+  real BLE auth, when the DSN is unknown) replaces it
 - `_async_finish` simplified to BLE auth + entry creation only (no provisioning probe, no key fetch)
 - `_async_resolve_valid_mac` simplified — no BLE probe, just candidate discovery + connectable filter
 

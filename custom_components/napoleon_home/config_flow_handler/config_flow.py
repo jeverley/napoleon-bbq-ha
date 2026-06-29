@@ -22,8 +22,9 @@ Setup flow (BLE discovery — only supported path):
        confirm, re-probes; routes to ``async_step_provision_guide`` when s:6,
        or shows an error if ATT 0x05 persists.
     4. ``async_step_key_retrieval``: User enters Napoleon account credentials.
-       Device matched by DSN (from GATT read) or fuzzy MAC offset. Local key
-       fetched via API, validated by BLE auth, hub entry and sub-entry created.
+       Device matched by DSN (from GATT read) when known; otherwise every account
+       device's key is tried against the grill via real BLE auth until one is
+       accepted. Hub entry and sub-entry created on success.
 
 Manual setup (``async_step_user``) is not supported — aborts with
 ``discovery_required``. The grill must be discovered via BLE advertisement.
@@ -43,6 +44,7 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
+from bleak.exc import BleakError
 import voluptuous as vol
 
 from custom_components.napoleon_home.api import (
@@ -398,7 +400,10 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             async with NapoleonHomeBLESession(mac) as session:
                 await session.connect(ble_device)
                 if self._ble_dsn is None:
-                    self._ble_dsn = await session.read_dsn()
+                    try:
+                        self._ble_dsn = await session.read_dsn()
+                    except BleakError:
+                        LOGGER.debug("Napoleon Home %s: DSN read failed — will match by MAC", mac)
                 return await session.check_provisioned()
         except NapoleonHomeAlreadyBondedError:
             raise
@@ -422,9 +427,9 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         Reached after the BLE probe confirms the grill is provisioned (or gives an
         inconclusive result). Lists devices in the account and matches the grill by
-        DSN (from the pre/post-bond GATT read) or fuzzy MAC offset variants as
-        fallback. Fetches the local key and calls ``_async_finish`` to validate via
-        BLE and create the config entry.
+        DSN (from the GATT read) when known. If the DSN is unknown or not found in
+        the account, every account device's key is tried in turn — ``_async_finish``
+        performs real BLE authentication, so the grill itself decides the match.
 
         Args:
             user_input: Form data submitted by the user, or None to show the form.
@@ -455,45 +460,63 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 LOGGER.exception("Unexpected exception during Napoleon Home key retrieval")
                 errors["base"] = "unknown"
             else:
-                # Match device: prefer DSN from GATT read, fall back to fuzzy MAC.
-                mac_variants = set(_mac_variant_candidates(self._mac or ""))
+                # Match device: prefer DSN from GATT read. If unknown or stale,
+                # try every account device and let real BLE auth decide — more
+                # robust than guessing a MAC offset.
                 match: tuple[str, str, str] | None = None
                 if self._ble_dsn:
                     match = next((d for d in devices if d[0] == self._ble_dsn), None)
-                    if match is None:
+                    if match is not None:
+                        LOGGER.debug("Napoleon Home: matched device by DSN %s", self._ble_dsn)
+                    else:
                         LOGGER.warning(
-                            "Napoleon Home: DSN %s not found in account — falling back to MAC match",
+                            "Napoleon Home: DSN %s not found in account — trying all %d device(s)",
                             self._ble_dsn,
+                            len(devices),
                         )
-                if match is None:
-                    match = next((d for d in devices if d[2].upper() in mac_variants), None)
 
-                if match is None:
+                candidates = [match] if match is not None else devices
+
+                if not candidates:
                     errors["base"] = "no_devices_found"
                 else:
-                    dsn, device_name, _ = match
                     self._username = username.strip()
                     self._password = password
                     self._region_key = region_key
                     self._access_token = access_token
                     self._refresh_token = refresh_token
                     self._token_expiry = token_expiry
-                    try:
-                        local_key, local_key_id = await client.async_fetch_key(access_token, dsn)
-                        return await self._async_finish(dsn, device_name, local_key, local_key_id)
-                    except NapoleonHomeNotProvisionedError:
-                        return await self.async_step_provision_guide()
-                    except NapoleonHomeMacAddressRequiredError:
-                        errors["base"] = "ble_discovery_required"
-                    except ConfigEntryAuthFailed:
-                        errors["base"] = "ble_key_rejected"
-                    except HomeAssistantError:
-                        errors["base"] = "cannot_connect"
-                    except NapoleonHomeApiClientError:
-                        errors["base"] = "cannot_connect"
-                    except Exception:  # noqa: BLE001
-                        LOGGER.exception("Unexpected exception finalising Napoleon Home setup")
-                        errors["base"] = "unknown"
+
+                    result: config_entries.ConfigFlowResult | None = None
+                    key_rejected = False
+                    for dsn, device_name, _ in candidates:
+                        try:
+                            local_key, local_key_id = await client.async_fetch_key(access_token, dsn)
+                            result = await self._async_finish(dsn, device_name, local_key, local_key_id)
+                        except NapoleonHomeNotProvisionedError:
+                            return await self.async_step_provision_guide()
+                        except ConfigEntryAuthFailed:
+                            LOGGER.debug("Napoleon Home: DSN %s key rejected — trying next candidate", dsn)
+                            key_rejected = True
+                            continue
+                        except NapoleonHomeMacAddressRequiredError:
+                            errors["base"] = "ble_discovery_required"
+                            break
+                        except HomeAssistantError:
+                            errors["base"] = "cannot_connect"
+                            break
+                        except NapoleonHomeApiClientError:
+                            errors["base"] = "cannot_connect"
+                            break
+                        except Exception:  # noqa: BLE001
+                            LOGGER.exception("Unexpected exception finalising Napoleon Home setup")
+                            errors["base"] = "unknown"
+                            break
+                        else:
+                            return result
+
+                    if result is None and "base" not in errors:
+                        errors["base"] = "ble_key_rejected" if key_rejected else "no_devices_found"
 
         return self.async_show_form(
             step_id="key_retrieval",

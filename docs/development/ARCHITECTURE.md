@@ -195,7 +195,9 @@ Setup is **BLE-discovery only** (`async_step_user` aborts with `discovery_requir
 probes provisioning state (`_async_probe_ble`) immediately on advertisement and routes through
 `provision_guide` / `factory_reset_guide` before reaching `key_retrieval` (credentials form).
 Device matching in `key_retrieval` uses the DSN read from the open GATT DUID characteristic
-during `_async_probe_ble` (`session.read_dsn()`), falling back to fuzzy MAC offset variants.
+during `_async_probe_ble` (`session.read_dsn()`) when known. If the DSN is unknown or not found
+in the account, every account device's key is tried in turn — `_async_finish` performs real BLE
+authentication, so the grill itself decides the match rather than a MAC heuristic.
 
 **Key classes:**
 
