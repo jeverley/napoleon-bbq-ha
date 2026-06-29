@@ -33,7 +33,6 @@ from custom_components.napoleon_home.api import (
     NapoleonHomeApiClientCommunicationError,
     NapoleonHomeApiClientError,
 )
-from custom_components.napoleon_home.config_flow_handler.validate import async_validate_ble_key
 from custom_components.napoleon_home.const import (
     AYLA_REGIONS,
     CONF_ACCESS_TOKEN,
@@ -270,9 +269,6 @@ class NapoleonHomeGrillSubentryFlowHandler(config_entries.ConfigSubentryFlow):
         if not mac:
             msg = f"Napoleon Home {dsn}: cannot add sub-entry without BLE MAC"
             raise HomeAssistantError(msg)
-
-        if mac:
-            await async_validate_ble_key(self.hass, mac, local_key)
 
         entry = self._get_entry()
         self.hass.config_entries.async_update_entry(
