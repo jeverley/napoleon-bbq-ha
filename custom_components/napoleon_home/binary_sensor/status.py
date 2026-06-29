@@ -1,4 +1,4 @@
-"""Connectivity binary sensor for napoleon_home."""
+"""Status binary sensor for napoleon_home."""
 
 from __future__ import annotations
 
@@ -17,15 +17,15 @@ if TYPE_CHECKING:
 
 ENTITY_DESCRIPTIONS: tuple[BinarySensorEntityDescription, ...] = (
     BinarySensorEntityDescription(
-        key="connectivity",
-        translation_key="connectivity",
+        key="status",
+        translation_key="status",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
 
 
-class NapoleonHomeConnectivityBinarySensor(BinarySensorEntity, NapoleonHomeEntity):
+class NapoleonHomeStatusBinarySensor(BinarySensorEntity, NapoleonHomeEntity):
     """Binary sensor indicating whether the grill is BLE-connected and authenticated."""
 
     def __init__(
@@ -33,12 +33,12 @@ class NapoleonHomeConnectivityBinarySensor(BinarySensorEntity, NapoleonHomeEntit
         coordinator: NapoleonHomeDataUpdateCoordinator,
         entity_description: BinarySensorEntityDescription,
     ) -> None:
-        """Initialise the connectivity sensor."""
+        """Initialise the status sensor."""
         super().__init__(coordinator, entity_description)
 
     @property
     def available(self) -> bool:
-        """Always expose connectivity state, even when the grill is disconnected."""
+        """Always expose status, even when the grill is disconnected."""
         return True
 
     @property

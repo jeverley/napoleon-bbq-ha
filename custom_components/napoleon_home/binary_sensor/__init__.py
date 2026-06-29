@@ -10,7 +10,7 @@ from .battery_saver_mode import (
     ENTITY_DESCRIPTIONS as DISPLAY_POWER_SAVE_DESCRIPTIONS,
     NapoleonHomeDisplayPowerSaveBinarySensor,
 )
-from .connectivity import ENTITY_DESCRIPTIONS as CONNECTIVITY_DESCRIPTIONS, NapoleonHomeConnectivityBinarySensor
+from .status import ENTITY_DESCRIPTIONS as STATUS_DESCRIPTIONS, NapoleonHomeStatusBinarySensor
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.data import NapoleonHomeConfigEntry
@@ -27,11 +27,11 @@ async def async_setup_entry(
     for subentry_id, coordinator in entry.runtime_data.items():
         async_add_entities(
             tuple(
-                NapoleonHomeConnectivityBinarySensor(
+                NapoleonHomeStatusBinarySensor(
                     coordinator=coordinator,
                     entity_description=entity_description,
                 )
-                for entity_description in CONNECTIVITY_DESCRIPTIONS
+                for entity_description in STATUS_DESCRIPTIONS
             )
             + tuple(
                 NapoleonHomeDisplayPowerSaveBinarySensor(

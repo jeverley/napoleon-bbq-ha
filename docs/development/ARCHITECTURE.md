@@ -49,7 +49,7 @@ custom_components/napoleon_home/
 │
 ├── binary_sensor/
 │   ├── __init__.py
-│   ├── connectivity.py           # BLE connection state sensor
+│   ├── status.py                 # BLE connection state sensor
 │   └── battery_saver_mode.py     # Battery saver mode diagnostic binary sensor
 │
 ├── button/
