@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.3.2...v0.4.0) (2026-06-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **napoleon_home:** the connectivity diagnostic binary_sensor's key and translation_key change from "connectivity" to "status", changing its unique_id. Existing installs will see a new status entity and an orphaned connectivity entity, which should be removed manually.
+
+### Bug Fixes
+
+* **napoleon_home:** handle DSN read failures and try every device for BLE key matching ([9a6d1f1](https://github.com/jeverley/napoleon-home-ha/commit/9a6d1f1b92e8d50a76c3ac9318e9c4c18d2f690e))
+
+
+### Code Refactoring
+
+* **napoleon_home:** rename connectivity binary sensor to status ([42be86d](https://github.com/jeverley/napoleon-home-ha/commit/42be86d5213e0acae6a48b57547196bf7d3b7b0d))
+
 ## [0.3.2](https://github.com/jeverley/napoleon-home-ha/compare/v0.3.1...v0.3.2) (2026-06-29)
 
 
