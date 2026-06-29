@@ -25,7 +25,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from bleak.backends.device import BLEDevice
-from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
+from bleak_retry_connector import BleakClientWithServiceCache, BleakNotFoundError, establish_connection
 
 from custom_components.napoleon_home.bluetooth import (
     NapoleonHomeOutboxAssembler,
@@ -37,12 +37,16 @@ from custom_components.napoleon_home.bluetooth import (
 from custom_components.napoleon_home.const import (
     AUTH_TIMEOUT,
     AUTH_USER,
-    ENCRYPT_SETTLE,
+    BLE_AUTH_STATUS_NOT_PROVISIONED,
+    BLE_AUTH_STATUS_REJECTED,
+    DOMAIN,
     INBOX_UUID,
     LOGGER,
     MAX_CONNECT_FAILURES,
     OUTBOX_UUID,
     POLL_PROPS,
+    PROP_BSMODE,
+    PROP_TYPE_BOOL,
 )
 from homeassistant.components.bluetooth import (
     BluetoothChange,
@@ -52,6 +56,7 @@ from homeassistant.components.bluetooth import (
     async_register_callback,
 )
 from homeassistant.core import CALLBACK_TYPE, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.data import NapoleonHomeConfigEntry, NapoleonHomeGrillState
@@ -113,6 +118,8 @@ class NapoleonHomeBLEMixin:
         self._bt_cancel_callback: CALLBACK_TYPE | None = None
         self._stopping: bool = False
         self._circuit_open: bool = False
+        self._bsmode_desired: int = 1
+        self._auth_rejected: asyncio.Event = asyncio.Event()
 
     # Connection state
 
@@ -140,6 +147,7 @@ class NapoleonHomeBLEMixin:
             self._bt_cancel_callback()
             self._bt_cancel_callback = None
         LOGGER.debug("Napoleon Home %s: waiting for advertisement", self._mac)
+        LOGGER.debug("Napoleon Home %s: setup_stage=bt_callback_registered scan_mode=active", self._mac)
         self._bt_cancel_callback = async_register_callback(
             self.hass,
             self._on_advertisement,
@@ -164,19 +172,20 @@ class NapoleonHomeBLEMixin:
             change: The type of advertisement change that fired this callback.
 
         """
+        if self._connecting or self.connected:
+            # A connection is already in progress or established. Discard this
+            # advertisement — leave the callback registered so the next one fires.
+            LOGGER.debug(
+                "Napoleon Home %s: setup_stage=advertisement_ignored state=%s rssi=%s change=%s",
+                self._mac,
+                "connecting" if self._connecting else "connected",
+                service_info.advertisement.rssi,
+                change,
+            )
+            return
         if self._bt_cancel_callback is not None:
             self._bt_cancel_callback()
             self._bt_cancel_callback = None
-        if self._connecting or self.connected:
-            # A connection is already in progress or established. Discard this
-            # advertisement — _connect_and_run will re-register the callback when
-            # the current attempt concludes.
-            LOGGER.debug(
-                "Napoleon Home %s: advertisement ignored — already %s",
-                self._mac,
-                "connecting" if self._connecting else "connected",
-            )
-            return
         LOGGER.debug(
             "Napoleon Home %s: advertisement received (rssi=%s), connecting",
             self._mac,
@@ -219,16 +228,22 @@ class NapoleonHomeBLEMixin:
                 self._connect_failures,
                 MAX_CONNECT_FAILURES,
             )
-            client = await establish_connection(
-                BleakClientWithServiceCache,
-                device,
-                self._mac,
-                disconnected_callback=self._on_disconnect,
-                max_attempts=1,
-                ble_device_callback=lambda: (
-                    async_ble_device_from_address(self.hass, self._mac, connectable=True) or device
-                ),
-            )
+            try:
+                client = await establish_connection(
+                    BleakClientWithServiceCache,
+                    device,
+                    self._mac,
+                    disconnected_callback=self._on_disconnect,
+                    max_attempts=1,
+                    ble_device_callback=lambda: (
+                        async_ble_device_from_address(self.hass, self._mac, connectable=True) or device
+                    ),
+                )
+            except (BleakNotFoundError, TimeoutError) as err:
+                LOGGER.debug("Napoleon Home %s: could not connect — %s", self._mac, err)
+                self._connecting = False
+                self._on_disconnect(None)
+                return
             if self._stopping:
                 # Shutdown raced the connect; disconnect cleanly and exit without
                 # incrementing the failure counter.
@@ -242,20 +257,47 @@ class NapoleonHomeBLEMixin:
             # if it races this window, and so immediate Odp ACKs from start_notify
             # can be sent via _send_msg.
             self._client = client
+            # Bond with the grill so the BLE link is encrypted before any INBOX write.
+            # INBOX (01000001-fe28) requires an encrypted, bonded link — ATT error 0x05
+            # is returned otherwise.  On first run this triggers Just Works SMP (no PIN).
+            # On subsequent runs BlueZ uses the stored LTK and pair() returns immediately.
             try:
-                paired = await client.pair()
-                LOGGER.debug("Napoleon Home %s: BLE paired (result=%s)", self._mac, paired)
-            except Exception as pair_exc:  # noqa: BLE001
-                LOGGER.warning(
-                    "Napoleon Home %s: BLE pair() failed (non-fatal, link may already be encrypted): %s",
-                    self._mac,
-                    pair_exc,
-                )
-            await asyncio.sleep(ENCRYPT_SETTLE)
+                await client.pair()
+                LOGGER.debug("Napoleon Home %s: BLE link bonded/encrypted", self._mac)
+            except Exception:  # noqa: BLE001
+                # pair() raises if already bonded ("already paired") — that is fine;
+                # the stored LTK means the connection is already encrypted.  Any other
+                # exception is logged as a warning but we continue: _authenticate() will
+                # fail with a timeout if the link is genuinely not encrypted, which
+                # increments the failure counter and triggers a reconnect/retry.
+                LOGGER.debug("Napoleon Home %s: pair() raised — proceeding (already bonded?)", self._mac)
             await client.start_notify(OUTBOX_UUID, self._on_notification)
-            self._mtu = client.mtu_size
+            # The grill expects a complete JSON object in a single INBOX write; it disconnects on
+            # a partial fragment.  The default ATT MTU (23) forces fragmentation into ~4 chunks.
+            # Explicitly negotiate a larger MTU so the full Oac payload fits in one write.
+            # _acquire_mtu() is on the bluezdbus backend; other backends set mtu_size directly.
+            _acquire = getattr(getattr(client, "_backend", client), "_acquire_mtu", None)
+            if callable(_acquire):
+                await _acquire()  # type: ignore[misc]
+                self._mtu = client.mtu_size
             LOGGER.debug("Napoleon Home %s: outbox subscribed (MTU=%d)", self._mac, self._mtu)
             await self._authenticate()
+            await self._async_apply_post_auth_defaults()
+        except ConfigEntryAuthFailed:
+            LOGGER.warning(
+                "Napoleon Home %s: auth failed due to rotated/rejected BLE key; starting reauth",
+                self._mac,
+            )
+            self.config_entry.async_start_reauth(self.hass)
+            if self._client is not None:
+                client_ref = self._client
+                self._client = None
+                self._auth_ok.clear()
+                with contextlib.suppress(Exception):
+                    await client_ref.disconnect()
+            else:
+                self._on_disconnect(None)
+            return
         except Exception:  # noqa: BLE001
             self._connect_failures += 1
             if self._connect_failures >= MAX_CONNECT_FAILURES:
@@ -278,7 +320,9 @@ class NapoleonHomeBLEMixin:
                         await client_ref.disconnect()
                 # If self._client is None, establish_connection already drained the slot.
             else:
-                LOGGER.exception("Error connecting to Napoleon Home %s", self._mac)
+                LOGGER.warning(
+                    "Napoleon Home %s: connection attempt failed — will retry on next advertisement", self._mac
+                )
                 if self._client is not None:
                     # Post-connect failure (auth timeout, start_notify error, etc.):
                     # explicit disconnect triggers _on_disconnect via the BleakClient
@@ -311,23 +355,50 @@ class NapoleonHomeBLEMixin:
         (auth success) to be signalled via the ``_auth_ok`` event.
         """
         self._auth_ok.clear()
+        self._auth_rejected.clear()
         LOGGER.debug("Napoleon Home %s: sending auth challenge request (Oac t:1)", self._mac)
         await self._send_msg("Oac", {"t": 1, "i": AUTH_USER})
-        try:
-            await asyncio.wait_for(self._auth_ok.wait(), timeout=AUTH_TIMEOUT)
-            self._connect_failures = 0
-            LOGGER.debug("Napoleon Home %s: authenticated", self._mac)
-            self.update_interval = timedelta(seconds=self._poll_interval)
-            self.config_entry.async_create_background_task(
-                self.hass,
-                self.async_refresh(),
-                f"napoleon_home_initial_poll_{self._mac}",
+
+        ok_task = asyncio.ensure_future(self._auth_ok.wait())
+        rejected_task = asyncio.ensure_future(self._auth_rejected.wait())
+        done, pending = await asyncio.wait(
+            {ok_task, rejected_task},
+            timeout=AUTH_TIMEOUT,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+
+        if self._auth_rejected.is_set():
+            LOGGER.warning("Napoleon Home %s: BLE auth rejected (s:4) — local key has rotated", self._mac)
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN,
+                translation_key="ble_auth_rejected",
             )
-        except TimeoutError:
+        if not done:
             LOGGER.warning("Authentication timed out for Napoleon Home %s", self._mac)
-            # Re-raise so _connect_and_run's except block counts this as a failure.
-            # _connect_and_run then disconnects the client explicitly.
-            raise
+            raise TimeoutError("Authentication timed out")
+
+        self._connect_failures = 0
+        LOGGER.debug("Napoleon Home %s: authenticated", self._mac)
+        self.update_interval = timedelta(seconds=self._poll_interval)
+        self.config_entry.async_create_background_task(
+            self.hass,
+            self.async_refresh(),
+            f"napoleon_home_initial_poll_{self._mac}",
+        )
+
+    async def _async_apply_post_auth_defaults(self) -> None:
+        """Apply desired defaults after authentication without affecting auth success."""
+        try:
+            await self._send_msg("Opr", {"n": PROP_BSMODE, "t": PROP_TYPE_BOOL, "v": self._bsmode_desired})
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning(
+                "Napoleon Home %s: failed to apply post-auth defaults (BSMODE=%s): %s",
+                self._mac,
+                self._bsmode_desired,
+                err,
+            )
 
     @callback
     def _on_disconnect(self, client: BleakClientWithServiceCache | None) -> None:
@@ -345,6 +416,11 @@ class NapoleonHomeBLEMixin:
         """
         self._client = None
         self._auth_ok.clear()
+        self._auth_rejected.clear()
+        if self.update_interval is not None:
+            # Disconnected from an authenticated session — reset so the next reconnect
+            # starts with a clean failure count rather than inheriting stale retries.
+            self._connect_failures = 0
         self.update_interval = None
         LOGGER.debug("Disconnected from Napoleon Home %s — waiting for advertisement", self._mac)
         if not self._stopping and not self._circuit_open:
@@ -400,6 +476,15 @@ class NapoleonHomeBLEMixin:
         if opcode == "oac":
             t = payload.get("t")
             if t == 1:
+                s = payload.get("s")
+                if s == BLE_AUTH_STATUS_NOT_PROVISIONED:
+                    LOGGER.warning(
+                        "Napoleon Home %s: grill not provisioned (s:6) — provision via Napoleon app first",
+                        self._mac,
+                    )
+                    # Not a key error: don't set _auth_rejected. _authenticate will time out
+                    # and the coordinator will retry on the next BLE advertisement.
+                    return
                 challenge = payload.get("c", "")
                 LOGGER.debug(
                     "Napoleon Home %s: auth challenge received (oac t:1), sending HMAC response",
@@ -411,8 +496,12 @@ class NapoleonHomeBLEMixin:
                     f"napoleon_home_auth_response_{self._mac}",
                 )
             elif t == 2:
-                LOGGER.debug("Napoleon Home %s: auth accepted by grill (oac t:2)", self._mac)
-                self._auth_ok.set()
+                s = payload.get("s")
+                if s == BLE_AUTH_STATUS_REJECTED:
+                    self._auth_rejected.set()
+                else:
+                    LOGGER.debug("Napoleon Home %s: auth accepted by grill (oac t:2)", self._mac)
+                    self._auth_ok.set()
             else:
                 LOGGER.debug("Napoleon Home %s: unexpected oac t=%s", self._mac, t)
         elif opcode == "gpr":
@@ -426,14 +515,30 @@ class NapoleonHomeBLEMixin:
             name = payload.get("n")
             value = payload.get("v")
             if name is not None and value is not None:
-                LOGGER.debug("Napoleon Home %s: push %s=%r (seq=%d)", self._mac, name, value, seq)
-                self.data.update_from_property(name, value)
-                self.async_set_updated_data(self.data)
                 self.config_entry.async_create_background_task(
                     self.hass,
                     self._send_msg("odp", {"n": name}, ack_seq=seq),
                     f"napoleon_home_odp_ack_{self._mac}",
                 )
+                if name == PROP_BSMODE and int(value) != self._bsmode_desired:
+                    LOGGER.debug(
+                        "Napoleon Home %s: push %s=%r (seq=%d) mismatches desired=%s; reasserting",
+                        self._mac,
+                        name,
+                        value,
+                        seq,
+                        self._bsmode_desired,
+                    )
+                    self.config_entry.async_create_background_task(
+                        self.hass,
+                        self._send_msg("Opr", {"n": PROP_BSMODE, "t": PROP_TYPE_BOOL, "v": self._bsmode_desired}),
+                        f"napoleon_home_bsmode_reassert_{self._mac}",
+                    )
+                    return
+
+                LOGGER.debug("Napoleon Home %s: push %s=%r (seq=%d)", self._mac, name, value, seq)
+                self.data.update_from_property(name, value)
+                self.async_set_updated_data(self.data)
         elif opcode == "opr":
             LOGGER.debug("Napoleon Home %s: opr ack (n=%s)", self._mac, payload.get("n"))
         elif opcode == "ukn":
@@ -522,7 +627,7 @@ class NapoleonHomeBLEMixin:
             # exception handler in _connect_and_run between chunk iterations.
             ble_client = self._client
             for chunk in chunks:
-                await ble_client.write_gatt_char(INBOX_UUID, chunk, response=False)
+                await ble_client.write_gatt_char(INBOX_UUID, chunk, response=True)
 
     async def _poll_properties(self) -> None:
         """
@@ -549,6 +654,11 @@ class NapoleonHomeBLEMixin:
 
         """
         await self._send_msg("Opr", {"n": name, "t": type_code, "v": value})
+
+    async def async_set_bsmode(self, value: int) -> None:
+        """Write BSMODE and persist as the desired value so re-assert logic uses it."""
+        self._bsmode_desired = value
+        await self._send_msg("Opr", {"n": PROP_BSMODE, "t": PROP_TYPE_BOOL, "v": value})
 
     async def _shutdown_ble(self) -> None:
         """

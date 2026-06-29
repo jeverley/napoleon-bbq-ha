@@ -16,6 +16,7 @@ ENTITY_DESCRIPTIONS: tuple[LightEntityDescription, ...] = (
     LightEntityDescription(
         key="knob_lights",
         translation_key="knob_lights",
+        icon="mdi:knob",
     ),
 )
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from custom_components.napoleon_home.const import PARALLEL_UPDATES as PARALLEL_UPDATES
 
-from .turn_off import ENTITY_DESCRIPTIONS, NapoleonHomeTurnOffButton
+from .power_off import ENTITY_DESCRIPTIONS, NapoleonHomePowerOffButton
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.data import NapoleonHomeConfigEntry
@@ -23,7 +23,7 @@ async def async_setup_entry(
     for subentry_id, coordinator in entry.runtime_data.items():
         async_add_entities(
             (
-                NapoleonHomeTurnOffButton(
+                NapoleonHomePowerOffButton(
                     coordinator=coordinator,
                     entity_description=entity_description,
                 )

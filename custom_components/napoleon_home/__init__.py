@@ -24,7 +24,6 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
-    Platform.SWITCH,
 ]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -36,6 +35,32 @@ _REMOVED_ENTITY_KEYS: tuple[tuple[str, str], ...] = (
     ("select", "brightness"),
     # battery_saver renamed to display_idle_timeout
     ("switch", "battery_saver"),
+    # display_power_save switch migrated to diagnostic sensor
+    ("switch", "display_power_save"),
+    # display_power_save diagnostic sensor migrated to binary_sensor
+    ("sensor", "display_power_save"),
+    # connected binary sensor renamed to connectivity
+    ("binary_sensor", "connected"),
+    # turn_off button renamed to power_off
+    ("button", "turn_off"),
+    # renamed keys to match current naming
+    ("binary_sensor", "display_power_save"),
+    ("sensor", "battery_level"),
+    ("sensor", "probe_4_temp"),
+    ("sensor", "firmware_version"),
+    ("light", "backlight"),
+    ("select", "temp_unit"),
+    ("select", "gas_unit"),
+    ("number", "auto_shutoff"),
+    ("sensor", "probe_1_temp"),
+    ("sensor", "probe_2_temp"),
+    ("sensor", "probe_3_temp"),
+    ("sensor", "grill_temperature"),
+    ("number", "probe_1_target_temp"),
+    ("number", "probe_2_target_temp"),
+    ("number", "probe_3_target_temp"),
+    ("number", "probe_4_target_temp"),
+    ("number", "probe_4_target"),
 )
 
 

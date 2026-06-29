@@ -13,28 +13,32 @@ A Home Assistant integration for **Napoleon Prestige grills**, providing direct 
 
 - **Bluetooth auto-discovery** — grills advertising as `Prestige-*` are detected automatically
 - **Multiple grills** — add as many grills as you like under a single account
-- **Probe temperatures** — monitor up to four meat probes with configurable target temperatures
+- **Probe and grill temperatures** — monitor Probe 1–3 plus grill temperature with configurable targets
 - **Gas tank weight** — track remaining gas level
-- **Grill controls** — knob backlight, display power save, temperature and gas units
-- **Turn off** — remotely turn off the grill from Home Assistant
+- **Grill controls** — knob lights, display brightness, battery saver mode, temperature and tank units
+- **Power off** — remotely power off the grill from Home Assistant
 
 ## Entities
 
 Each configured grill exposes the following entities:
 
-| Platform        | Entity                | Description                             |
-| --------------- | --------------------- | --------------------------------------- |
-| `binary_sensor` | Connected             | Whether the grill is reachable over BLE |
-| `sensor`        | Probe 1–4 temperature | Live meat probe readings                |
-| `sensor`        | Battery level         | Controller battery level                |
-| `sensor`        | Gas tank weight       | Remaining gas (kg or lbs)               |
-| `sensor`        | Firmware version      | Grill firmware (diagnostic)             |
-| `number`        | Probe 1–4 target temp | Alert threshold per probe               |
-| `light`         | Knob backlight        | Illuminated knob ring brightness        |
-| `switch`        | Display power save    | Auto-dim the grill display              |
-| `select`        | Temperature unit      | Celsius or Fahrenheit                   |
-| `select`        | Gas unit              | Kilograms or Pounds                     |
-| `button`        | Turn off grill        | Remotely turn off the grill             |
+| Platform        | Entity                   | Description                              |
+| --------------- | ------------------------ | ---------------------------------------- |
+| `binary_sensor` | Connectivity             | Whether the grill is reachable over BLE  |
+| `binary_sensor` | Battery saver mode       | Display battery saver mode (diagnostic)  |
+| `sensor`        | Probe 1–3 + Grill        | Live temperature readings                |
+| `sensor`        | Battery                  | Controller battery level                 |
+| `sensor`        | Gas tank weight          | Remaining gas (kg or lbs)                |
+| `sensor`        | Firmware                 | Grill firmware (diagnostic)              |
+| `number`        | Automatic shutoff        | Grill automatic shutoff timeout (1–24 h) |
+| `number`        | Probe 1–3 + Grill target | Alert threshold per channel              |
+| `number`        | Empty tank weight        | Gas calibration: empty tank weight       |
+| `number`        | Full tank weight         | Gas calibration: full tank weight        |
+| `light`         | Knob lights              | Illuminated knob rings on/off            |
+| `select`        | Temperature unit         | Celsius or Fahrenheit                    |
+| `select`        | Tank unit                | Kilograms or Pounds                      |
+| `select`        | Display brightness       | Low, Medium, or High                     |
+| `button`        | Power off                | Remotely power off the grill             |
 
 ## Requirements
 
@@ -69,12 +73,11 @@ Or go to **Settings → Devices & Services → Add Integration** and search for 
 
 ### During setup you will need
 
-| Field             | Description                                                         |
-| ----------------- | ------------------------------------------------------------------- |
-| Email             | Your Napoleon app email address                                     |
-| Password          | Your Napoleon app password                                          |
-| Region            | The region your account is registered in                            |
-| Grill MAC address | Bluetooth MAC address of the grill — leave blank if auto-discovered |
+| Field    | Description                              |
+| -------- | ---------------------------------------- |
+| Email    | Your Napoleon app email address          |
+| Password | Your Napoleon app password               |
+| Region   | The region your account is registered in |
 
 If your account has multiple grills, you will be prompted to select which one to configure. Additional grills can be added afterwards via **Add grill** on the integration page.
 

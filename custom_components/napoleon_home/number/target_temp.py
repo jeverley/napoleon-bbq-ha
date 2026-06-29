@@ -28,8 +28,8 @@ class NapoleonHomeTargetTempNumberEntityDescription(NumberEntityDescription):
 
 ENTITY_DESCRIPTIONS: tuple[NapoleonHomeTargetTempNumberEntityDescription, ...] = tuple(
     NapoleonHomeTargetTempNumberEntityDescription(
-        key=f"probe_{probe}_target_temp",
-        translation_key=f"probe_{probe}_target_temp",
+        key="grill_target" if probe == 4 else f"probe_{probe}_target",
+        translation_key="grill_target" if probe == 4 else f"probe_{probe}_target",
         mode=NumberMode.BOX,
         native_step=1.0,
         probe=probe,
@@ -78,10 +78,23 @@ class NapoleonHomeTargetTempNumber(NumberEntity, NapoleonHomeEntity):
 
     @property
     def available(self) -> bool:
-        """Return True only when the probe is physically connected to the grill."""
-        return self.coordinator.last_update_success and self.coordinator.data.probe_connected(
-            self.entity_description.probe
-        )
+        """Return availability for probe targets and grill target channels.
+
+        Probe 1-3 targets are unavailable when physically unplugged.
+        The grill target channel (probe slot 4 on this model) remains available
+        whenever BLE is authenticated.
+
+        """
+        if self.entity_description.probe == 4:
+            return self.coordinator.authenticated
+        return self.coordinator.authenticated and self.coordinator.data.probe_connected(self.entity_description.probe)
+
+    @property
+    def icon(self) -> str:
+        """Return icon for probe and grill target channels."""
+        if self.entity_description.probe == 4:
+            return "mdi:thermometer"
+        return "mdi:thermometer-probe" if self.available else "mdi:thermometer-probe-off"
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the target temperature for this probe on the grill."""

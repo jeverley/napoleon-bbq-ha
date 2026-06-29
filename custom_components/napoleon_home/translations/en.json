@@ -3,15 +3,11 @@
     "step": {
       "user": {
         "title": "Connect to Napoleon Home",
-        "description": "Enter your Napoleon app account credentials to connect your Napoleon Home account. The grill must be registered in the Napoleon app.{name}",
+        "description": "Enter your Napoleon app account credentials to connect your Napoleon Home account. The grill must be registered in the Napoleon app and discoverable via Bluetooth during setup.{name}",
         "data": {
           "username": "Email",
           "password": "Password",
-          "region": "Region",
-          "mac_address": "Grill MAC address"
-        },
-        "data_description": {
-          "mac_address": "Bluetooth MAC address of the grill (e.g. AA:BB:CC:DD:EE:FF). Leave blank if the grill was discovered automatically."
+          "region": "Region"
         }
       },
       "pick_device": {
@@ -20,6 +16,21 @@
         "data": {
           "dsn": "Grill"
         }
+      },
+      "factory_reset_guide": {
+        "title": "Factory reset required",
+        "description": "**{name}** is already provisioned and no longer accepts new Bluetooth bonds.\n\nTo add this grill to Home Assistant you must first factory reset it:\n\n1. On the grill, hold the **Menu** and **Select** buttons simultaneously until the display resets\n2. The grill will return to its factory state\n3. Tap **Continue** — you will then be guided through provisioning",
+        "submit": "Continue"
+      },
+      "provision_guide": {
+        "title": "Provision your grill",
+        "description": "**{name}** hasn't been set up yet.\n\n1. Open the **Napoleon** app on your phone\n2. Add and provision the grill (follow the in-app instructions)\n3. Once setup is complete, **close the Napoleon app**\n4. Return here and tap **Continue**",
+        "submit": "Continue"
+      },
+      "auto_add_confirm": {
+        "title": "Add grill",
+        "description": "A Napoleon Prestige grill **{name}** was found in your account. Add it to Home Assistant?",
+        "submit": "Add grill"
       },
       "reauth_confirm": {
         "title": "Re-authenticate Napoleon Home",
@@ -35,6 +46,10 @@
       "invalid_auth": "Invalid credentials. Check your Napoleon app email and password.",
       "cannot_connect": "Failed to connect to the Napoleon cloud. Check your internet connection.",
       "no_devices_found": "No Napoleon Prestige grills found in your account.",
+      "already_bonded": "Grill no longer accepts new Bluetooth bonds — factory reset the grill first.",
+      "ble_not_provisioned": "Grill is not provisioned — please complete setup in the Napoleon app first.",
+      "ble_discovery_required": "Couldn't determine the grill Bluetooth address. Start setup from Bluetooth discovery by powering on the grill and adding it when detected.",
+      "ble_key_rejected": "BLE key rejected by grill — the local key may have rotated. Try reauthenticating.",
       "unknown": "Unexpected error. Check the Home Assistant logs for details."
     },
     "abort": {
@@ -95,80 +110,107 @@
   "exceptions": {
     "update_failed": {
       "message": "Failed to poll properties from the Napoleon Home grill."
+    },
+    "ble_auth_rejected": {
+      "message": "BLE key rejected by grill — the local key has rotated. Please reauthenticate."
     }
   },
   "entity": {
     "binary_sensor": {
-      "connected": {
-        "name": "Connected"
+      "battery_saver_mode": {
+        "name": "Battery saver mode"
+      },
+      "connectivity": {
+        "name": "Connectivity"
       }
     },
     "sensor": {
-      "probe_1_temp": {
-        "name": "Probe 1 temperature"
+      "probe_1": {
+        "name": "Probe 1"
       },
-      "probe_2_temp": {
-        "name": "Probe 2 temperature"
+      "probe_2": {
+        "name": "Probe 2"
       },
-      "probe_3_temp": {
-        "name": "Probe 3 temperature"
+      "probe_3": {
+        "name": "Probe 3"
       },
-      "probe_4_temp": {
-        "name": "Probe 4 temperature"
+      "grill": {
+        "name": "Grill"
       },
-      "battery_level": {
-        "name": "Battery level"
+      "battery": {
+        "name": "Battery"
       },
       "tank_weight": {
-        "name": "Gas tank weight"
+        "name": "Tank weight"
       },
-      "firmware_version": {
-        "name": "Firmware version"
+      "gas_tank_name": {
+        "name": "Tank name"
+      },
+      "region": {
+        "name": "Region"
+      },
+      "country": {
+        "name": "Country"
+      },
+      "firmware": {
+        "name": "Firmware"
       }
     },
     "light": {
-      "backlight": {
-        "name": "Knob backlight"
-      }
-    },
-    "switch": {
-      "display_power_save": {
-        "name": "Display power save"
+      "knob_lights": {
+        "name": "Knob lights"
       }
     },
     "select": {
-      "temp_unit": {
+      "temperature_unit": {
         "name": "Temperature unit",
         "state": {
           "celsius": "Celsius",
           "fahrenheit": "Fahrenheit"
         }
       },
-      "gas_unit": {
-        "name": "Gas unit",
+      "tank_unit": {
+        "name": "Tank unit",
         "state": {
           "kg": "Kilograms",
           "lbs": "Pounds"
         }
+      },
+      "display_brightness": {
+        "name": "Display brightness",
+        "state": {
+          "low": "Low",
+          "medium": "Medium",
+          "high": "High"
+        }
       }
     },
     "number": {
-      "probe_1_target_temp": {
-        "name": "Probe 1 target temperature"
+      "automatic_shutoff": {
+        "name": "Automatic shutoff"
       },
-      "probe_2_target_temp": {
-        "name": "Probe 2 target temperature"
+      "probe_1_target": {
+        "name": "Probe 1 target"
       },
-      "probe_3_target_temp": {
-        "name": "Probe 3 target temperature"
+      "probe_2_target": {
+        "name": "Probe 2 target"
       },
-      "probe_4_target_temp": {
-        "name": "Probe 4 target temperature"
+      "probe_3_target": {
+        "name": "Probe 3 target"
+      },
+      "grill_target": {
+        "name": "Grill target"
+      },
+      "empty_tank_weight": {
+        "name": "Empty tank weight"
+      },
+      "full_tank_weight": {
+        "name": "Full tank weight"
       }
     },
     "button": {
-      "turn_off": {
-        "name": "Turn off grill"
+      "power_off": {
+        "name": "Power off"
       }
     }
   }

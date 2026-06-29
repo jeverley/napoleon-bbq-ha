@@ -25,10 +25,15 @@ from custom_components.napoleon_home.const import (
     PROP_BRT_LVL,
     PROP_BSMODE,
     PROP_BT_LVL,
+    PROP_CNTRY,
+    PROP_EMTY_TNK_W,
+    PROP_F_TNKWT,
+    PROP_GS_TNK_NAME,
     PROP_GS_UNT,
     PROP_LCD_OFF,
     PROP_PRB_STAT,
     PROP_PRB_TEMPS,
+    PROP_REGN,
     PROP_TGT_TEMPS,
     PROP_TNK_WT,
     PROP_TUNIT,
@@ -57,15 +62,20 @@ class NapoleonHomeGrillState:
         tunit: Temperature unit — 0 = Celsius, 1 = Fahrenheit.
         bsmode: Battery/screen saver mode enabled state.
         lcd_off: Knob backlights off state — True = off.
-        brt_lvl: Knob backlight brightness level (0=low, 1=medium, 2=high). None if not yet polled.
+        brt_lvl: Display brightness level (1=low, 3=mid, 5=high). None if not yet polled.
         auto_t_out: Auto shutoff timeout in hours (1–24). None if not yet polled.
         gs_unt: Gas unit — 0 = kg, 1 = lbs.
         probe_temps: Current probe temperatures keyed by probe number (1–4). None = not yet received.
         probe_stat: Probe connected state bitmask (bit 0 = probe 1, bit 3 = probe 4).
         target_temps: Target temperatures keyed by probe number (1–4). None = not yet received.
-        battery_level: Battery level percentage. None if not yet polled.
+        battery_level: Battery level percentage (BT_LVL 0-5 × 20). None if not yet polled.
         battery_low: True if the battery low alert is active.
         tank_weight: Current gas tank weight in gs_unt units. None if not configured or not yet polled.
+        empty_tank_weight: Empty tank calibration weight in gs_unt units. None if not yet polled.
+        full_tank_weight: Full tank calibration weight in gs_unt units. None if not yet polled.
+        region: Grill region code. None if not yet polled.
+        country: Grill country code. None if not yet polled.
+        gas_tank_name: Configured gas tank name. None if not yet polled.
         firmware_version: Grill firmware version string. None if not yet polled.
 
     """
@@ -91,6 +101,11 @@ class NapoleonHomeGrillState:
     battery_level: int | None = None
     battery_low: bool = False
     tank_weight: float | None = None
+    empty_tank_weight: float | None = None
+    full_tank_weight: float | None = None
+    region: str | None = None
+    country: str | None = None
+    gas_tank_name: str | None = None
     firmware_version: str | None = None
 
     def probe_connected(self, probe: int) -> bool:
@@ -148,20 +163,30 @@ class NapoleonHomeGrillState:
             self.auto_t_out = int(value)
         elif name == PROP_GS_UNT:
             self.gs_unt = int(value)
+        elif name == PROP_REGN:
+            self.region = str(value) if value != "" else None
+        elif name == PROP_CNTRY:
+            self.country = str(value) if value != "" else None
+        elif name == PROP_GS_TNK_NAME:
+            self.gas_tank_name = str(value) if value != "" else None
         elif name == PROP_PRB_STAT:
             self.probe_stat = int(value)
         elif name == PROP_BT_LVL:
-            self.battery_level = int(value)
+            self.battery_level = int(value) * 20  # 0-5 bar scale → 0-100%
         elif name == PROP_BATTERY_LOW_ALERT:
             self.battery_low = bool(value)
         elif name == PROP_TNK_WT:
             # -14400 is the sentinel value indicating the gas tank has not been configured.
             self.tank_weight = float(value) if value != -14400 else None
+        elif name == PROP_EMTY_TNK_W:
+            self.empty_tank_weight = float(value) if value != "" else None
+        elif name == PROP_F_TNKWT:
+            self.full_tank_weight = float(value) if value != "" else None
         elif name == PROP_VERSION:
             self.firmware_version = str(value)
         elif name in PROP_PRB_TEMPS:
             probe = PROP_PRB_TEMPS.index(name) + 1
-            self.probe_temps[probe] = float(value)
+            self.probe_temps[probe] = float(value) if value != "" else None
         elif name in PROP_TGT_TEMPS:
             probe = PROP_TGT_TEMPS.index(name) + 1
-            self.target_temps[probe] = float(value)
+            self.target_temps[probe] = float(value) if value != "" else None

@@ -31,8 +31,8 @@ class NapoleonHomeProbeTempSensorEntityDescription(SensorEntityDescription):
 
 ENTITY_DESCRIPTIONS: tuple[NapoleonHomeProbeTempSensorEntityDescription, ...] = tuple(
     NapoleonHomeProbeTempSensorEntityDescription(
-        key=f"probe_{probe}_temp",
-        translation_key=f"probe_{probe}_temp",
+        key="grill" if probe == 4 else f"probe_{probe}",
+        translation_key="grill" if probe == 4 else f"probe_{probe}",
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
         probe=probe,
@@ -80,5 +80,20 @@ class NapoleonHomeProbeTempSensor(SensorEntity, NapoleonHomeEntity):
 
     @property
     def available(self) -> bool:
-        """Return True only when BLE is authenticated and the probe is physically connected."""
+        """Return availability for probes and grill temperature channels.
+
+        Probe 1-3 sensors are unavailable when physically unplugged.
+        The grill temperature channel (probe slot 4 on this model) remains
+        available whenever BLE is authenticated.
+
+        """
+        if self.entity_description.probe == 4:
+            return self.coordinator.authenticated
         return self.coordinator.authenticated and self.coordinator.data.probe_connected(self.entity_description.probe)
+
+    @property
+    def icon(self) -> str:
+        """Return icon for probe and grill temperature channels."""
+        if self.entity_description.probe == 4:
+            return "mdi:thermometer"
+        return "mdi:thermometer-probe" if self.available else "mdi:thermometer-probe-off"

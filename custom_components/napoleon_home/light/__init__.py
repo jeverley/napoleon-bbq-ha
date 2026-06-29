@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from custom_components.napoleon_home.const import PARALLEL_UPDATES as PARALLEL_UPDATES
 
-from .backlight import ENTITY_DESCRIPTIONS as BACKLIGHT_DESCRIPTIONS, NapoleonHomeBacklightLight
+from .knob_lights import ENTITY_DESCRIPTIONS as KNOB_LIGHTS_DESCRIPTIONS, NapoleonHomeBacklightLight
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.data import NapoleonHomeConfigEntry
@@ -27,7 +27,7 @@ async def async_setup_entry(
                     coordinator=coordinator,
                     entity_description=entity_description,
                 )
-                for entity_description in BACKLIGHT_DESCRIPTIONS
+                for entity_description in KNOB_LIGHTS_DESCRIPTIONS
             ),
             config_subentry_id=subentry_id,
         )
