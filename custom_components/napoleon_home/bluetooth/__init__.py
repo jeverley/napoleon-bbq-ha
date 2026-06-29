@@ -14,8 +14,10 @@ See _handover/CLAUDE.md — Protocol section.
 """
 
 from .protocol import NapoleonHomeOutboxAssembler, compute_hmac, decode_msg, encode_inbox, make_msg
+from .session import NapoleonHomeBLESession
 
 __all__ = [
+    "NapoleonHomeBLESession",
     "NapoleonHomeOutboxAssembler",
     "compute_hmac",
     "decode_msg",

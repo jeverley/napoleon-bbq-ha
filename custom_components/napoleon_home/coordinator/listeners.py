@@ -7,11 +7,11 @@ notification handling from the DataUpdateCoordinator polling logic. Mixed into
 
 Protocol overview:
     - Advertisement callback reconnects the grill whenever it powers on.
-    - ``_connect_and_run``: establishes BLE, subscribes to outbox, authenticates.
-    - ``_authenticate``: sends ``Oac t:1``, awaits HMAC challenge, verifies ``Oac t:2``.
-    - ``_on_notification``: routes ``oac``, ``gpr``, ``Odp``, ``opr``, ``ukn`` messages.
-    - All writes go through ``_send_msg`` which fragments payloads and serialises via
-      an ``asyncio.Lock``.
+    - ``_connect_and_run``: creates a ``NapoleonHomeBLESession``, connects,
+      registers data handlers, and calls ``session.authenticate()``.
+    - Data handlers ``_handle_gpr`` / ``_handle_odp`` / ``_handle_opr`` /
+      ``_handle_ukn`` are registered on the session and called per opcode.
+    - All writes go through ``_send_msg`` which delegates to the session.
 
 For more information on the BLE protocol:
 See _handover/CLAUDE.md — Protocol section.
@@ -19,35 +19,15 @@ See _handover/CLAUDE.md — Protocol section.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from bleak.backends.device import BLEDevice
-from bleak_retry_connector import BleakClientWithServiceCache, BleakNotFoundError, establish_connection
+from bleak_retry_connector import BleakClientWithServiceCache, BleakNotFoundError
 
-from custom_components.napoleon_home.bluetooth import (
-    NapoleonHomeOutboxAssembler,
-    compute_hmac,
-    decode_msg,
-    encode_inbox,
-    make_msg,
-)
-from custom_components.napoleon_home.const import (
-    AUTH_TIMEOUT,
-    AUTH_USER,
-    BLE_AUTH_STATUS_NOT_PROVISIONED,
-    BLE_AUTH_STATUS_REJECTED,
-    DOMAIN,
-    INBOX_UUID,
-    LOGGER,
-    MAX_CONNECT_FAILURES,
-    OUTBOX_UUID,
-    POLL_PROPS,
-    PROP_BSMODE,
-    PROP_TYPE_BOOL,
-)
+from custom_components.napoleon_home.bluetooth import NapoleonHomeBLESession
+from custom_components.napoleon_home.const import LOGGER, MAX_CONNECT_FAILURES, POLL_PROPS, PROP_BSMODE, PROP_TYPE_BOOL
 from homeassistant.components.bluetooth import (
     BluetoothChange,
     BluetoothScanningMode,
@@ -68,7 +48,7 @@ class NapoleonHomeBLEMixin:
     BLE connection lifecycle mixin for the Napoleon Prestige grill coordinator.
 
     Provides advertisement detection, BLE connection with retry, Ayla Local Control
-    v2 HMAC authentication, fragmented GATT write helpers, and notification routing.
+    v2 HMAC authentication (via ``NapoleonHomeBLESession``), and notification routing.
 
     Requires the host class to provide:
         - ``self.hass`` (HomeAssistant)
@@ -107,31 +87,26 @@ class NapoleonHomeBLEMixin:
         """
         self._mac = mac
         self._local_key = local_key
-        self._client: BleakClientWithServiceCache | None = None
-        self._mtu: int = 512
-        self._assembler = NapoleonHomeOutboxAssembler()
-        self._write_lock = asyncio.Lock()
-        self._auth_ok = asyncio.Event()
-        self._seq: int = 0
+        self._session: NapoleonHomeBLESession | None = None
+        self._authenticated: bool = False
         self._connecting: bool = False
         self._connect_failures: int = 0
         self._bt_cancel_callback: CALLBACK_TYPE | None = None
         self._stopping: bool = False
         self._circuit_open: bool = False
         self._bsmode_desired: int = 1
-        self._auth_rejected: asyncio.Event = asyncio.Event()
 
     # Connection state
 
     @property
     def connected(self) -> bool:
-        """Return True if the BLE client is currently connected."""
-        return self._client is not None and self._client.is_connected
+        """Return True if the BLE session is currently connected."""
+        return self._session is not None and self._session.connected
 
     @property
     def authenticated(self) -> bool:
         """Return True if the grill session is fully authenticated."""
-        return self.connected and self._auth_ok.is_set()
+        return self.connected and self._authenticated
 
     # Advertisement → connection
 
@@ -173,8 +148,6 @@ class NapoleonHomeBLEMixin:
 
         """
         if self._connecting or self.connected:
-            # A connection is already in progress or established. Discard this
-            # advertisement — leave the callback registered so the next one fires.
             LOGGER.debug(
                 "Napoleon Home %s: setup_stage=advertisement_ignored state=%s rssi=%s change=%s",
                 self._mac,
@@ -199,25 +172,29 @@ class NapoleonHomeBLEMixin:
 
     async def _connect_and_run(self, device: BLEDevice) -> None:
         """
-        Establish a BLE connection, authenticate, and maintain the session.
+        Establish a BLE session, authenticate, and maintain the connection.
 
-        Uses ``establish_connection`` (``bleak_retry_connector``) for robust BLE
-        connection with automatic slot-draining, backoff, and error classification.
-        After a successful connect, subscribes to outbox notifications and performs
-        the Ayla Local Control v2 authentication handshake.
-
-        Any error during connect or auth increments the failure counter. After
+        Creates a ``NapoleonHomeBLESession``, connects, registers the data
+        notification handlers, then calls ``session.authenticate()``. Any error
+        during connect or auth increments the failure counter. After
         ``MAX_CONNECT_FAILURES`` consecutive failures the circuit breaker opens
         (``_circuit_open = True``) and auto-reconnect stops. Reload the entry to
         resume.
 
-        Returns immediately without counting a failure if ``_stopping`` is set
-        after a successful connect (entry is being unloaded).
+        Catches ``NapoleonHomeNotProvisionedError`` specially — logs a warning
+        and disconnects without incrementing the failure counter, so that an
+        unprovisioned grill doesn't trip the circuit breaker while the user
+        completes provisioning in the Napoleon app.
 
         Args:
             device: The ``BLEDevice`` to connect to.
 
         """
+        # Deferred import to avoid a module-level circular dependency.
+        from custom_components.napoleon_home.config_flow_handler.validate import (  # noqa: PLC0415
+            NapoleonHomeNotProvisionedError,
+        )
+
         if self._connecting or self.connected:
             return
         self._connecting = True
@@ -228,13 +205,12 @@ class NapoleonHomeBLEMixin:
                 self._connect_failures,
                 MAX_CONNECT_FAILURES,
             )
+
+            session = NapoleonHomeBLESession(self._mac)
             try:
-                client = await establish_connection(
-                    BleakClientWithServiceCache,
+                await session.connect(
                     device,
-                    self._mac,
-                    disconnected_callback=self._on_disconnect,
-                    max_attempts=1,
+                    on_disconnect=self._on_disconnect,
                     ble_device_callback=lambda: (
                         async_ble_device_from_address(self.hass, self._mac, connectable=True) or device
                     ),
@@ -244,60 +220,67 @@ class NapoleonHomeBLEMixin:
                 self._connecting = False
                 self._on_disconnect(None)
                 return
+
             if self._stopping:
-                # Shutdown raced the connect; disconnect cleanly and exit without
-                # incrementing the failure counter.
+                # Shutdown raced the connect; disconnect cleanly without counting a failure.
                 with contextlib.suppress(Exception):
-                    await client.disconnect()
+                    await session.disconnect()
                 return
-            LOGGER.debug("Napoleon Home %s: BLE connected, subscribing to outbox", self._mac)
-            self._seq = 0
-            self._assembler = NapoleonHomeOutboxAssembler()
-            # Assign self._client before sleeping so _shutdown_ble can disconnect us
-            # if it races this window, and so immediate Odp ACKs from start_notify
-            # can be sent via _send_msg.
-            self._client = client
-            # Bond with the grill so the BLE link is encrypted before any INBOX write.
-            # INBOX (01000001-fe28) requires an encrypted, bonded link — ATT error 0x05
-            # is returned otherwise.  On first run this triggers Just Works SMP (no PIN).
-            # On subsequent runs BlueZ uses the stored LTK and pair() returns immediately.
-            try:
-                await client.pair()
-                LOGGER.debug("Napoleon Home %s: BLE link bonded/encrypted", self._mac)
-            except Exception:  # noqa: BLE001
-                # pair() raises if already bonded ("already paired") — that is fine;
-                # the stored LTK means the connection is already encrypted.  Any other
-                # exception is logged as a warning but we continue: _authenticate() will
-                # fail with a timeout if the link is genuinely not encrypted, which
-                # increments the failure counter and triggers a reconnect/retry.
-                LOGGER.debug("Napoleon Home %s: pair() raised — proceeding (already bonded?)", self._mac)
-            await client.start_notify(OUTBOX_UUID, self._on_notification)
-            # The grill expects a complete JSON object in a single INBOX write; it disconnects on
-            # a partial fragment.  The default ATT MTU (23) forces fragmentation into ~4 chunks.
-            # Explicitly negotiate a larger MTU so the full Oac payload fits in one write.
-            # _acquire_mtu() is on the bluezdbus backend; other backends set mtu_size directly.
-            _acquire = getattr(getattr(client, "_backend", client), "_acquire_mtu", None)
-            if callable(_acquire):
-                await _acquire()  # type: ignore[misc]
-                self._mtu = client.mtu_size
-            LOGGER.debug("Napoleon Home %s: outbox subscribed (MTU=%d)", self._mac, self._mtu)
-            await self._authenticate()
+
+            # Session is live — make it visible and register data handlers.
+            self._session = session
+            session.register_handler("gpr", self._handle_gpr)
+            session.register_handler("Odp", self._handle_odp)
+            session.register_handler("opr", self._handle_opr)
+            session.register_handler("ukn", self._handle_ukn)
+
+            await session.authenticate(self._local_key)
+
+            # Auth succeeded.
+            self._authenticated = True
+            self._connect_failures = 0
+            LOGGER.debug("Napoleon Home %s: authenticated", self._mac)
+            self.update_interval = timedelta(seconds=self._poll_interval)
+            self.config_entry.async_create_background_task(
+                self.hass,
+                self.async_refresh(),
+                f"napoleon_home_initial_poll_{self._mac}",
+            )
             await self._async_apply_post_auth_defaults()
+
+        except NapoleonHomeNotProvisionedError:
+            # Not a key/connection error — grill is reachable but not set up yet.
+            # Don't count this as a failure; just wait for the next advertisement
+            # after the user completes provisioning via the Napoleon app.
+            LOGGER.warning(
+                "Napoleon Home %s: grill not provisioned (s:6) — waiting for provisioning via Napoleon app",
+                self._mac,
+            )
+            if self._session is not None:
+                session_ref = self._session
+                self._session = None
+                self._authenticated = False
+                with contextlib.suppress(Exception):
+                    await session_ref.disconnect()
+            else:
+                self._on_disconnect(None)
+
         except ConfigEntryAuthFailed:
             LOGGER.warning(
                 "Napoleon Home %s: auth failed due to rotated/rejected BLE key; starting reauth",
                 self._mac,
             )
             self.config_entry.async_start_reauth(self.hass)
-            if self._client is not None:
-                client_ref = self._client
-                self._client = None
-                self._auth_ok.clear()
+            if self._session is not None:
+                session_ref = self._session
+                self._session = None
+                self._authenticated = False
                 with contextlib.suppress(Exception):
-                    await client_ref.disconnect()
+                    await session_ref.disconnect()
             else:
                 self._on_disconnect(None)
             return
+
         except Exception:  # noqa: BLE001
             self._connect_failures += 1
             if self._connect_failures >= MAX_CONNECT_FAILURES:
@@ -307,86 +290,29 @@ class NapoleonHomeBLEMixin:
                     self._mac,
                     self._connect_failures,
                 )
-                # Open the circuit breaker so _on_disconnect does not restart auto-reconnect
-                # when the grill eventually drops this connection.
                 self._circuit_open = True
-                if self._client is not None:
-                    # Post-connect failure at the limit: disconnect fires _on_disconnect which
-                    # sees _circuit_open=True and skips re-registration.
-                    client_ref = self._client
-                    self._client = None
-                    self._auth_ok.clear()
+                if self._session is not None:
+                    session_ref = self._session
+                    self._session = None
+                    self._authenticated = False
                     with contextlib.suppress(Exception):
-                        await client_ref.disconnect()
-                # If self._client is None, establish_connection already drained the slot.
+                        await session_ref.disconnect()
             else:
                 LOGGER.warning(
                     "Napoleon Home %s: connection attempt failed — will retry on next advertisement", self._mac
                 )
-                if self._client is not None:
-                    # Post-connect failure (auth timeout, start_notify error, etc.):
-                    # explicit disconnect triggers _on_disconnect via the BleakClient
-                    # callback, which clears state and re-registers the advertisement
-                    # callback so the grill sees a clean teardown before we retry.
-                    client_ref = self._client
-                    self._client = None
-                    self._auth_ok.clear()
+                if self._session is not None:
+                    session_ref = self._session
+                    self._session = None
+                    self._authenticated = False
                     try:
-                        await client_ref.disconnect()
+                        await session_ref.disconnect()
                     except Exception:  # noqa: BLE001
-                        # disconnect() raised before the BleakClient callback could fire;
-                        # call _on_disconnect manually so auto-reconnect can continue.
                         self._on_disconnect(None)
                 else:
-                    # establish_connection itself failed and already called
-                    # wait_for_disconnect internally before raising, so the BlueZ slot
-                    # is drained. Just re-register the advertisement callback.
                     self._on_disconnect(None)
         finally:
             self._connecting = False
-
-    async def _authenticate(self) -> None:
-        """
-        Perform the Ayla Local Control v2 HMAC-SHA256 authentication handshake.
-
-        Sends ``Oac t:1`` (challenge request) and waits for the grill to reply
-        with a nonce on the outbox. The notification callback computes the HMAC
-        response and sends ``Oac t:2``. This method then waits for ``oac t:2``
-        (auth success) to be signalled via the ``_auth_ok`` event.
-        """
-        self._auth_ok.clear()
-        self._auth_rejected.clear()
-        LOGGER.debug("Napoleon Home %s: sending auth challenge request (Oac t:1)", self._mac)
-        await self._send_msg("Oac", {"t": 1, "i": AUTH_USER})
-
-        ok_task = asyncio.ensure_future(self._auth_ok.wait())
-        rejected_task = asyncio.ensure_future(self._auth_rejected.wait())
-        done, pending = await asyncio.wait(
-            {ok_task, rejected_task},
-            timeout=AUTH_TIMEOUT,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for t in pending:
-            t.cancel()
-
-        if self._auth_rejected.is_set():
-            LOGGER.warning("Napoleon Home %s: BLE auth rejected (s:4) — local key has rotated", self._mac)
-            raise ConfigEntryAuthFailed(
-                translation_domain=DOMAIN,
-                translation_key="ble_auth_rejected",
-            )
-        if not done:
-            LOGGER.warning("Authentication timed out for Napoleon Home %s", self._mac)
-            raise TimeoutError("Authentication timed out")
-
-        self._connect_failures = 0
-        LOGGER.debug("Napoleon Home %s: authenticated", self._mac)
-        self.update_interval = timedelta(seconds=self._poll_interval)
-        self.config_entry.async_create_background_task(
-            self.hass,
-            self.async_refresh(),
-            f"napoleon_home_initial_poll_{self._mac}",
-        )
 
     async def _async_apply_post_auth_defaults(self) -> None:
         """Apply desired defaults after authentication without affecting auth success."""
@@ -414,9 +340,8 @@ class NapoleonHomeBLEMixin:
             client: The disconnected BleakClient, or None if called manually.
 
         """
-        self._client = None
-        self._auth_ok.clear()
-        self._auth_rejected.clear()
+        self._session = None
+        self._authenticated = False
         if self.update_interval is not None:
             # Disconnected from an authenticated session — reset so the next reconnect
             # starts with a clean failure count rather than inheriting stale retries.
@@ -426,152 +351,63 @@ class NapoleonHomeBLEMixin:
         if not self._stopping and not self._circuit_open:
             self._register_bt_callback()
 
-    # GATT notification routing
+    # GATT notification handlers (registered on the session per-opcode)
 
-    @callback
-    def _on_notification(self, sender: Any, raw: bytearray) -> None:
-        """
-        Process a raw GATT indication from the outbox characteristic.
-
-        Feeds the raw bytes through the fragmentation assembler and, once a
-        complete message is available, routes it by opcode:
-
-        - ``oac t:1``: Schedules the HMAC response task (must not block callback).
-        - ``oac t:2``: Sets the ``_auth_ok`` event to unblock ``_authenticate``.
-        - ``gpr``: Applies the polled property value and pushes state to entities.
-        - ``Odp``: Applies the pushed property value, ACKs with ``odp``, pushes state.
-        - ``opr``: Logged as debug; either an ignored write-ACK or config-sync request.
-        - ``ukn``: Logged as a warning; indicates the grill received an invalid command.
-
-        Args:
-            sender: The GATT characteristic that sent the indication (unused).
-            raw: Raw bytes from the indication.
-
-        """
-        LOGGER.debug(
-            "Napoleon Home %s: RX %d bytes: %s",
-            self._mac,
-            len(raw),
-            raw.hex(),
-        )
-        complete = self._assembler.feed(bytes(raw))
-        if complete is None:
-            LOGGER.debug("Napoleon Home %s: RX fragment — awaiting more chunks", self._mac)
-            return
-
-        msg = decode_msg(complete)
-        if msg is None:
-            LOGGER.debug(
-                "Napoleon Home %s: RX non-JSON data: %s",
-                self._mac,
-                complete.hex(),
-            )
-            return
-
-        LOGGER.debug("Napoleon Home %s: RX msg: %s", self._mac, msg)
-        opcode = msg.get("o")
-        seq: int = msg.get("i", 0)
+    def _handle_gpr(self, msg: dict[str, Any]) -> None:
+        """Handle a ``gpr`` polled-property response from the grill."""
         payload: dict[str, Any] = msg.get("p") or {}
+        name = payload.get("n")
+        value = payload.get("v")
+        if name is not None and value is not None:
+            LOGGER.debug("Napoleon Home %s: gpr %s=%r", self._mac, name, value)
+            self.data.update_from_property(name, value)
+            self.async_set_updated_data(self.data)
 
-        if opcode == "oac":
-            t = payload.get("t")
-            if t == 1:
-                s = payload.get("s")
-                if s == BLE_AUTH_STATUS_NOT_PROVISIONED:
-                    LOGGER.warning(
-                        "Napoleon Home %s: grill not provisioned (s:6) — provision via Napoleon app first",
-                        self._mac,
-                    )
-                    # Not a key error: don't set _auth_rejected. _authenticate will time out
-                    # and the coordinator will retry on the next BLE advertisement.
-                    return
-                challenge = payload.get("c", "")
-                LOGGER.debug(
-                    "Napoleon Home %s: auth challenge received (oac t:1), sending HMAC response",
-                    self._mac,
-                )
-                self.config_entry.async_create_background_task(
-                    self.hass,
-                    self._send_hmac_response(challenge),
-                    f"napoleon_home_auth_response_{self._mac}",
-                )
-            elif t == 2:
-                s = payload.get("s")
-                if s == BLE_AUTH_STATUS_REJECTED:
-                    self._auth_rejected.set()
-                else:
-                    LOGGER.debug("Napoleon Home %s: auth accepted by grill (oac t:2)", self._mac)
-                    self._auth_ok.set()
-            else:
-                LOGGER.debug("Napoleon Home %s: unexpected oac t=%s", self._mac, t)
-        elif opcode == "gpr":
-            name = payload.get("n")
-            value = payload.get("v")
-            if name is not None and value is not None:
-                LOGGER.debug("Napoleon Home %s: gpr %s=%r", self._mac, name, value)
-                self.data.update_from_property(name, value)
-                self.async_set_updated_data(self.data)
-        elif opcode == "Odp":
-            name = payload.get("n")
-            value = payload.get("v")
-            if name is not None and value is not None:
-                self.config_entry.async_create_background_task(
-                    self.hass,
-                    self._send_msg("odp", {"n": name}, ack_seq=seq),
-                    f"napoleon_home_odp_ack_{self._mac}",
-                )
-                if name == PROP_BSMODE and int(value) != self._bsmode_desired:
-                    LOGGER.debug(
-                        "Napoleon Home %s: push %s=%r (seq=%d) mismatches desired=%s; reasserting",
-                        self._mac,
-                        name,
-                        value,
-                        seq,
-                        self._bsmode_desired,
-                    )
-                    self.config_entry.async_create_background_task(
-                        self.hass,
-                        self._send_msg("Opr", {"n": PROP_BSMODE, "t": PROP_TYPE_BOOL, "v": self._bsmode_desired}),
-                        f"napoleon_home_bsmode_reassert_{self._mac}",
-                    )
-                    return
-
-                LOGGER.debug("Napoleon Home %s: push %s=%r (seq=%d)", self._mac, name, value, seq)
-                self.data.update_from_property(name, value)
-                self.async_set_updated_data(self.data)
-        elif opcode == "opr":
-            LOGGER.debug("Napoleon Home %s: opr ack (n=%s)", self._mac, payload.get("n"))
-        elif opcode == "ukn":
-            LOGGER.warning(
-                "Napoleon Home %s: ukn — invalid command rejected by grill (s=%s)",
-                self._mac,
-                msg.get("s"),
+    def _handle_odp(self, msg: dict[str, Any]) -> None:
+        """Handle an ``Odp`` push notification from the grill."""
+        payload: dict[str, Any] = msg.get("p") or {}
+        seq: int = msg.get("i", 0)
+        name = payload.get("n")
+        value = payload.get("v")
+        if name is not None and value is not None:
+            self.config_entry.async_create_background_task(
+                self.hass,
+                self._send_msg("odp", {"n": name}, ack_seq=seq),
+                f"napoleon_home_odp_ack_{self._mac}",
             )
-        else:
-            LOGGER.debug("Napoleon Home %s: unhandled opcode '%s'", self._mac, opcode)
+            if name == PROP_BSMODE and int(value) != self._bsmode_desired:
+                LOGGER.debug(
+                    "Napoleon Home %s: push %s=%r (seq=%d) mismatches desired=%s; reasserting",
+                    self._mac,
+                    name,
+                    value,
+                    seq,
+                    self._bsmode_desired,
+                )
+                self.config_entry.async_create_background_task(
+                    self.hass,
+                    self._send_msg("Opr", {"n": PROP_BSMODE, "t": PROP_TYPE_BOOL, "v": self._bsmode_desired}),
+                    f"napoleon_home_bsmode_reassert_{self._mac}",
+                )
+                return
+            LOGGER.debug("Napoleon Home %s: push %s=%r (seq=%d)", self._mac, name, value, seq)
+            self.data.update_from_property(name, value)
+            self.async_set_updated_data(self.data)
 
-    # GATT write helpers
+    def _handle_opr(self, msg: dict[str, Any]) -> None:
+        """Handle an ``opr`` write-ACK from the grill (logged as debug)."""
+        payload: dict[str, Any] = msg.get("p") or {}
+        LOGGER.debug("Napoleon Home %s: opr ack (n=%s)", self._mac, payload.get("n"))
 
-    async def _send_hmac_response(self, challenge_b64: str) -> None:
-        """
-        Compute the HMAC-SHA256 response and send ``Oac t:2`` to the grill.
-
-        Scheduled as a background task from the notification callback to avoid
-        blocking the BLE event loop.
-
-        Args:
-            challenge_b64: The base64-encoded 32-byte nonce from the grill's
-                ``oac t:1`` challenge message.
-
-        """
-        response = compute_hmac(self._local_key, challenge_b64)
-        LOGGER.debug(
-            "Napoleon Home %s: HMAC response computed (challenge=%s, response=%s)",
+    def _handle_ukn(self, msg: dict[str, Any]) -> None:
+        """Handle a ``ukn`` rejection — the grill received an invalid command."""
+        LOGGER.warning(
+            "Napoleon Home %s: ukn — invalid command rejected by grill (s=%s)",
             self._mac,
-            challenge_b64,
-            response,
+            msg.get("s"),
         )
-        await self._send_msg("Oac", {"t": 2, "r": response})
+
+    # GATT write helper
 
     async def _send_msg(
         self,
@@ -583,59 +419,31 @@ class NapoleonHomeBLEMixin:
         """
         Encode and write a protocol message to the inbox characteristic.
 
-        Manages the per-session sequence counter and serialises all writes through
-        an ``asyncio.Lock`` to prevent chunk interleaving when multiple coroutines
-        write concurrently (e.g. polling and ACK responses overlapping).
-
-        Long payloads are automatically fragmented by ``encode_inbox`` per the Ayla
-        fragmentation protocol.
+        Delegates to ``NapoleonHomeBLESession.write_msg``. Drops silently if the
+        session is not connected.
 
         Args:
             opcode: The Ayla protocol opcode string (e.g. ``"Oac"``, ``"Gpr"``).
             payload: Optional payload dict to include in the message envelope.
             ack_seq: When set, use this sequence number verbatim (for ``odp`` ACK
                 replies that must echo the received message's ``i`` value). When
-                None, the coordinator's internal counter is auto-incremented.
+                None, the session's internal counter is auto-incremented.
 
         """
-        if self._client is None:
+        if self._session is None:
             LOGGER.debug(
                 "Napoleon Home %s: _send_msg(%s) called while disconnected — dropped",
                 self._mac,
                 opcode,
             )
             return
-        if ack_seq is not None:
-            seq = ack_seq
-        else:
-            self._seq += 1
-            seq = self._seq
-        msg = make_msg(opcode, payload, seq)
-        chunks = encode_inbox(msg, self._mtu)
-        LOGGER.debug(
-            "Napoleon Home %s: TX %s seq=%d (%d chunk(s), MTU=%d)",
-            self._mac,
-            opcode,
-            seq,
-            len(chunks),
-            self._mtu,
-        )
-        async with self._write_lock:
-            if self._client is None:
-                return
-            # Snapshot to a local variable; self._client can be nulled by the
-            # exception handler in _connect_and_run between chunk iterations.
-            ble_client = self._client
-            for chunk in chunks:
-                await ble_client.write_gatt_char(INBOX_UUID, chunk, response=True)
+        await self._session.write_msg(opcode, payload, ack_seq=ack_seq)
 
     async def _poll_properties(self) -> None:
         """
         Send a ``Gpr`` poll request for every property in ``POLL_PROPS``.
 
         Called by ``_async_update_data`` on each coordinator refresh cycle.
-        Required when the grill has active WiFi/MQTT, since the grill only
-        pushes ``Odp`` for state-change events (not temperatures) in that mode.
         """
         for name in POLL_PROPS:
             await self._send_msg("Gpr", {"n": name})
@@ -664,7 +472,7 @@ class NapoleonHomeBLEMixin:
         """
         Tear down BLE state cleanly.
 
-        Cancels any pending advertisement callback and disconnects the BLE client.
+        Cancels any pending advertisement callback and disconnects the BLE session.
         Sets ``_stopping`` before disconnecting so that ``_on_disconnect`` does not
         re-register the advertisement callback after the entry is unloaded.
 
@@ -675,5 +483,5 @@ class NapoleonHomeBLEMixin:
         if self._bt_cancel_callback is not None:
             self._bt_cancel_callback()
             self._bt_cancel_callback = None
-        if self._client is not None:
-            await self._client.disconnect()
+        if self._session is not None:
+            await self._session.disconnect()

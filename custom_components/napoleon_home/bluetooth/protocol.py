@@ -135,6 +135,10 @@ class NapoleonHomeOutboxAssembler:
         """Initialise the assembler with an empty reassembly buffer."""
         self._buf: bytearray = bytearray()
 
+    def reset(self) -> None:
+        """Clear the reassembly buffer for a new connection."""
+        self._buf = bytearray()
+
     def feed(self, data: bytes) -> bytes | None:
         """Feed a raw indication chunk and return the complete message when ready.
 

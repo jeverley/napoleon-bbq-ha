@@ -17,6 +17,7 @@ PARALLEL_UPDATES = 1
 # BLE characteristic UUIDs
 INBOX_UUID = "01000001-fe28-435b-991a-f1b21bb9bcd0"
 OUTBOX_UUID = "01000002-fe28-435b-991a-f1b21bb9bcd0"
+DSN_UUID = "00000001-fe28-435b-991a-f1b21bb9bcd0"  # Ayla config service — readable without bond
 
 # Auth
 AUTH_USER = "android.user@email.com"

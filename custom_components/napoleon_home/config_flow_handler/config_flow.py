@@ -50,12 +50,8 @@ from custom_components.napoleon_home.api import (
     NapoleonHomeApiClientCommunicationError,
     NapoleonHomeApiClientError,
 )
-from custom_components.napoleon_home.config_flow_handler.validate import (
-    NapoleonHomeAlreadyBondedError,
-    NapoleonHomeNotProvisionedError,
-    async_check_ble_provisioned,
-    async_validate_ble_key,
-)
+from custom_components.napoleon_home.bluetooth import NapoleonHomeBLESession
+from custom_components.napoleon_home.config_flow_handler.validate import NapoleonHomeNotProvisionedError
 from custom_components.napoleon_home.const import (
     AYLA_DEFAULT_REGION,
     AYLA_REGION_EU,
@@ -283,6 +279,9 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._silent_add_dsn: str = ""
         self._silent_add_local_key: str = ""
         self._silent_add_local_key_id: int = 0
+        # Used when grill is unprovisioned: stored so provision_guide can re-attempt finish
+        self._pending_dsn: str = ""
+        self._pending_device_name: str = ""
 
     async def async_step_bluetooth(
         self,
@@ -321,23 +320,6 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._mac = discovery_info.address
         self._name = discovery_info.name or discovery_info.address
         self.context["title_placeholders"] = {"name": self._name}
-
-        # Probe whether the grill has been provisioned via the Napoleon app.
-        # This also bonds the BLE link, which must happen before app provisioning.
-        try:
-            provisioned = await async_check_ble_provisioned(self.hass, discovery_info.address)
-        except NapoleonHomeAlreadyBondedError:
-            LOGGER.info(
-                "Napoleon Home: setup_stage=bluetooth_step_branch branch=factory_reset_guide address=%s",
-                discovery_info.address,
-            )
-            return await self.async_step_factory_reset_guide()
-        if not provisioned:
-            LOGGER.info(
-                "Napoleon Home: setup_stage=bluetooth_step_branch branch=provision_guide address=%s",
-                discovery_info.address,
-            )
-            return await self.async_step_provision_guide()
 
         # If account hub entries already exist, try to add silently against each.
         result = await self._async_try_silent_add_any_hub(discovery_info.address)
@@ -392,36 +374,58 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """
         Guide the user through provisioning an unregistered grill.
 
-        Shown when the grill is detected via BLE but responds with ``s:6`` —
-        meaning it has not been set up via the Napoleon app yet. BLE pairing
-        (bonding) already occurred during the ``async_check_ble_provisioned``
-        probe, which is a prerequisite for the Napoleon app provisioning step.
+        Shown when the grill responds with ``s:6`` on the BLE provisioning probe,
+        meaning it has not been set up via the Napoleon app yet.
 
-        Instructs the user to:
-        1. Open the Napoleon app and complete the grill setup.
-        2. Close the Napoleon app once done.
-        3. Return here and tap **Continue**.
+        Two confirmation paths:
 
-        On confirmation, attempts a silent add if a hub entry exists (the grill
-        should now be registered in the Ayla account), otherwise falls through
-        to credential entry.
+        - **Credentials path** (``_pending_dsn`` set): user already signed in;
+          re-runs ``_async_finish`` for the pending DSN. Shows an error if the
+          grill is still not provisioned.
+        - **BLE discovery path** (``_pending_dsn`` empty): credentials not yet
+          collected; attempts a silent add via stored account tokens, then falls
+          back to credential entry.
 
         Args:
             user_input: Empty dict on confirmation, or None to show the form.
 
         Returns:
-            A form result, an auto-add confirm step, or the user credentials form.
+            A form result, a create-entry result, an auto-add confirm, or the
+            user credentials form.
 
         """
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            result = await self._async_try_silent_add_any_hub(self._mac or "")
-            if result is not None:
-                return result
-            return await self.async_step_user()
+            if self._pending_dsn:
+                # Credentials path: re-run _async_finish for the same DSN.
+                # The provisioning probe will determine if now provisioned.
+                region = AYLA_REGIONS[self._region_key]
+                client = NapoleonHomeApiClient(region, async_get_clientsession(self.hass))
+                try:
+                    return await self._async_finish(client, self._pending_dsn, self._pending_device_name)
+                except NapoleonHomeNotProvisionedError:
+                    errors["base"] = "ble_not_provisioned"
+                except NapoleonHomeMacAddressRequiredError:
+                    errors["base"] = "ble_discovery_required"
+                except ConfigEntryAuthFailed:
+                    errors["base"] = "invalid_auth"
+                except HomeAssistantError:
+                    errors["base"] = "cannot_connect"
+                except Exception:  # noqa: BLE001
+                    LOGGER.exception("Unexpected exception re-attempting Napoleon Home setup after provisioning")
+                    errors["base"] = "unknown"
+            else:
+                # BLE discovery path: credentials not yet collected.
+                result = await self._async_try_silent_add_any_hub(self._mac or "")
+                if result is not None:
+                    return result
+                return await self.async_step_user()
 
         return self.async_show_form(
             step_id="provision_guide",
             data_schema=vol.Schema({}),
+            errors=errors,
             description_placeholders={"name": self._name or self._mac or ""},
         )
 
@@ -526,17 +530,6 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             if not mac:
                 LOGGER.warning("Napoleon Home: setup_stage=silent_add_confirm_failed reason=missing_mac")
                 errors["base"] = "cannot_connect"
-            else:
-                try:
-                    await async_validate_ble_key(self.hass, mac, self._silent_add_local_key)
-                except NapoleonHomeAlreadyBondedError:
-                    errors["base"] = "already_bonded"
-                except NapoleonHomeNotProvisionedError:
-                    errors["base"] = "ble_not_provisioned"
-                except ConfigEntryAuthFailed:
-                    errors["base"] = "invalid_auth"
-                except HomeAssistantError:
-                    errors["base"] = "cannot_connect"
 
             if not errors:
                 hub_entry = self._silent_add_hub
@@ -647,10 +640,10 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                             self._mac = api_mac
                         try:
                             return await self._async_finish(client, dsn, device_name)
-                        except NapoleonHomeAlreadyBondedError:
-                            errors["base"] = "already_bonded"
                         except NapoleonHomeNotProvisionedError:
-                            errors["base"] = "ble_not_provisioned"
+                            self._pending_dsn = dsn
+                            self._pending_device_name = device_name
+                            return await self.async_step_provision_guide()
                         except NapoleonHomeMacAddressRequiredError:
                             errors["base"] = "ble_discovery_required"
                         except ConfigEntryAuthFailed:
@@ -694,16 +687,16 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 session = async_get_clientsession(self.hass)
                 client = NapoleonHomeApiClient(region, session)
                 return await self._async_finish(client, selected_dsn, device_name)
+            except NapoleonHomeNotProvisionedError:
+                self._pending_dsn = selected_dsn
+                self._pending_device_name = device_name
+                return await self.async_step_provision_guide()
             except NapoleonHomeApiClientAuthenticationError:
                 errors["base"] = "invalid_auth"
             except NapoleonHomeApiClientCommunicationError:
                 errors["base"] = "cannot_connect"
             except NapoleonHomeApiClientError:
                 errors["base"] = "unknown"
-            except NapoleonHomeAlreadyBondedError:
-                errors["base"] = "already_bonded"
-            except NapoleonHomeNotProvisionedError:
-                errors["base"] = "ble_not_provisioned"
             except NapoleonHomeMacAddressRequiredError:
                 errors["base"] = "ble_discovery_required"
             except ConfigEntryAuthFailed:
@@ -782,6 +775,7 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             selected_mac=self._mac or api_mac,
             device_name=device_name,
             local_key=local_key,
+            expected_dsn=dsn,
         )
         self._mac = resolved_mac
         mac = resolved_mac
@@ -842,7 +836,13 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             ],
         )
 
-    async def _async_resolve_valid_mac(self, selected_mac: str, device_name: str, local_key: str) -> str:
+    async def _async_resolve_valid_mac(
+        self,
+        selected_mac: str,
+        device_name: str,
+        local_key: str,
+        expected_dsn: str = "",
+    ) -> str:
         """Resolve and validate a working BLE MAC for the selected grill."""
         candidates: list[str] = []
         seen: set[str] = set()
@@ -878,30 +878,33 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             msg = "No BLE MAC address available for selected grill; start setup from Bluetooth discovery"
             raise NapoleonHomeMacAddressRequiredError(msg)
 
-        last_auth_error: ConfigEntryAuthFailed | None = None
         for mac in candidates:
-            if async_ble_device_from_address(self.hass, mac, connectable=True) is None:
+            ble_device = async_ble_device_from_address(self.hass, mac, connectable=True)
+            if ble_device is None:
                 continue
+            if selected_mac and mac != selected_mac.upper():
+                LOGGER.info(
+                    "Napoleon Home: setup_stage=mac_fallback original=%s resolved=%s device=%s",
+                    selected_mac,
+                    mac,
+                    device_name,
+                )
+            # Probe provisioning status. Returns False (s:6), True (challenge), or
+            # None (inconclusive — BLE busy/unreachable; don't block setup).
+            provisioned: bool | None = None
             try:
-                await async_validate_ble_key(self.hass, mac, local_key)
-            except NapoleonHomeAlreadyBondedError, NapoleonHomeNotProvisionedError:
-                raise
-            except ConfigEntryAuthFailed as err:
-                last_auth_error = err
-            except HomeAssistantError:
-                continue
-            else:
-                if selected_mac and mac != selected_mac.upper():
-                    LOGGER.info(
-                        "Napoleon Home: setup_stage=mac_fallback original=%s resolved=%s device=%s",
-                        selected_mac,
-                        mac,
-                        device_name,
-                    )
-                return mac
-
-        if last_auth_error is not None:
-            raise last_auth_error
+                async with NapoleonHomeBLESession(mac) as session:
+                    await session.connect(ble_device)
+                    provisioned = await session.check_provisioned()
+            except Exception:  # noqa: BLE001
+                LOGGER.debug(
+                    "Napoleon Home %s: provisioning probe failed — proceeding without check",
+                    mac,
+                )
+            if provisioned is False:
+                msg = f"Napoleon Home {mac}: grill not provisioned (s:6)"
+                raise NapoleonHomeNotProvisionedError(msg)
+            return mac
 
         msg = "Resolved BLE MAC is not currently discoverable; start setup from Bluetooth discovery"
         raise NapoleonHomeMacAddressRequiredError(msg)
