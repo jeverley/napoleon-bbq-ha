@@ -20,15 +20,20 @@ OUTBOX_UUID = "01000002-fe28-435b-991a-f1b21bb9bcd0"
 
 # Auth
 AUTH_USER = "android.user@email.com"
+BLE_AUTH_STATUS_REJECTED = 4  # s:4 on oac t:2 — wrong HMAC / rotated key
+BLE_AUTH_STATUS_NOT_PROVISIONED = 6  # s:6 on oac t:1 — grill not provisioned via Napoleon app
 
 # Custom config entry keys (use CONF_REGION from homeassistant.const for region)
 CONF_LOCAL_KEY = "local_key"
+CONF_LOCAL_KEY_ID = "local_key_id"
+CONF_ACCESS_TOKEN = "access_token"
+CONF_REFRESH_TOKEN = "refresh_token"
+CONF_TOKEN_EXPIRY = "token_expiry"
 CONF_MAC = "mac_address"
 CONF_DSN = "dsn"
 
 # Timings (seconds)
 AUTH_TIMEOUT = 15
-ENCRYPT_SETTLE = 0.5
 MAX_CONNECT_FAILURES = 5
 POLL_INTERVAL_S = 30
 
@@ -46,6 +51,11 @@ PROP_BRT_LVL = "BRT_LVL"
 PROP_AUTO_T_OUT = "AUTO_T_OUT"
 PROP_TOFF = "TOFF"
 PROP_GS_UNT = "GS_UNT"
+PROP_REGN = "REGN"
+PROP_CNTRY = "CNTRY"
+PROP_GS_TNK_NAME = "GS_TNK_NAME"
+PROP_EMTY_TNK_W = "EMTY_TNK_W"
+PROP_F_TNKWT = "F_TNKWT"
 PROP_BT_LVL = "BT_LVL"
 PROP_BATTERY_LOW_ALERT = "battery_low_alert"
 PROP_TNK_WT = "TNK_WT"
@@ -64,6 +74,11 @@ POLL_PROPS: list[str] = [
     PROP_BRT_LVL,
     PROP_AUTO_T_OUT,
     PROP_GS_UNT,
+    PROP_REGN,
+    PROP_CNTRY,
+    PROP_GS_TNK_NAME,
+    PROP_EMTY_TNK_W,
+    PROP_F_TNKWT,
     PROP_PRB_STAT,
     PROP_BT_LVL,
     PROP_BATTERY_LOW_ALERT,

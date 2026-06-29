@@ -6,8 +6,15 @@ from typing import TYPE_CHECKING
 
 from custom_components.napoleon_home.const import PARALLEL_UPDATES as PARALLEL_UPDATES
 
-from .diagnostic import ENTITY_DESCRIPTIONS as DIAGNOSTIC_DESCRIPTIONS, NapoleonHomeDiagnosticSensor
+from .battery import ENTITY_DESCRIPTIONS as BATTERY_DESCRIPTIONS, NapoleonHomeBatterySensor
+from .firmware import ENTITY_DESCRIPTIONS as FIRMWARE_DESCRIPTIONS, NapoleonHomeFirmwareVersionSensor
 from .probe_temp import ENTITY_DESCRIPTIONS as PROBE_TEMP_DESCRIPTIONS, NapoleonHomeProbeTempSensor
+from .tank_weight import (
+    DEBUG_ENTITY_DESCRIPTIONS as TANK_DEBUG_DESCRIPTIONS,
+    ENTITY_DESCRIPTIONS as TANK_WEIGHT_DESCRIPTIONS,
+    NapoleonHomeTankDebugSensor,
+    NapoleonHomeTankWeightSensor,
+)
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.data import NapoleonHomeConfigEntry
@@ -34,11 +41,41 @@ async def async_setup_entry(
         )
         async_add_entities(
             (
-                NapoleonHomeDiagnosticSensor(
+                NapoleonHomeBatterySensor(
                     coordinator=coordinator,
                     entity_description=entity_description,
                 )
-                for entity_description in DIAGNOSTIC_DESCRIPTIONS
+                for entity_description in BATTERY_DESCRIPTIONS
+            ),
+            config_subentry_id=subentry_id,
+        )
+        async_add_entities(
+            (
+                NapoleonHomeFirmwareVersionSensor(
+                    coordinator=coordinator,
+                    entity_description=entity_description,
+                )
+                for entity_description in FIRMWARE_DESCRIPTIONS
+            ),
+            config_subentry_id=subentry_id,
+        )
+        async_add_entities(
+            (
+                NapoleonHomeTankWeightSensor(
+                    coordinator=coordinator,
+                    entity_description=entity_description,
+                )
+                for entity_description in TANK_WEIGHT_DESCRIPTIONS
+            ),
+            config_subentry_id=subentry_id,
+        )
+        async_add_entities(
+            (
+                NapoleonHomeTankDebugSensor(
+                    coordinator=coordinator,
+                    entity_description=entity_description,
+                )
+                for entity_description in TANK_DEBUG_DESCRIPTIONS
             ),
             config_subentry_id=subentry_id,
         )

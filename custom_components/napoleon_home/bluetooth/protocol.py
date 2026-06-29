@@ -105,22 +105,20 @@ def encode_inbox(payload: str, mtu: int = 512) -> list[bytes]:
 def compute_hmac(local_key: str, challenge_b64: str) -> str:
     """Compute the HMAC-SHA256 auth response for the Ayla local-control handshake.
 
-    The grill issues a 32-byte random nonce (base64-encoded) in the oac t:1
-    challenge. The response is computed as:
-        data  = b"response" + base64.b64decode(challenge_b64)
-        reply = base64.b64encode(HMAC-SHA256(key=local_key.encode(), msg=data))
+    The grill issues a base64-encoded nonce in the oac t:1 challenge. The response is:
+        HMAC-SHA256(key=local_key.encode("utf-8"), msg=b"response" + base64.b64decode(challenge_b64))
 
     Args:
-        local_key: The per-device local key fetched from the Ayla cloud API at setup time.
-        challenge_b64: The base64-encoded 32-byte nonce from the grill's oac t:1 challenge.
+        local_key: Per-device key string from the Ayla cloud API (used as UTF-8, not decoded).
+        challenge_b64: Base64-encoded nonce from the grill's oac t:1 challenge.
 
     Returns:
         Base64-encoded HMAC-SHA256 digest to send as the oac t:2 auth response.
 
     """
-    challenge = base64.b64decode(challenge_b64)
-    data = b"response" + challenge
-    digest = hmac.new(local_key.encode("utf-8"), data, hashlib.sha256).digest()
+    key = local_key.encode("utf-8")
+    data = b"response" + base64.b64decode(challenge_b64)
+    digest = hmac.new(key, data, hashlib.sha256).digest()
     return base64.b64encode(digest).decode()
 
 

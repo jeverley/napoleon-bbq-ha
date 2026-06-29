@@ -17,15 +17,15 @@ if TYPE_CHECKING:
 
 ENTITY_DESCRIPTIONS: tuple[BinarySensorEntityDescription, ...] = (
     BinarySensorEntityDescription(
-        key="connected",
-        translation_key="connected",
+        key="connectivity",
+        translation_key="connectivity",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
 
 
-class NapoleonHomeConnectedBinarySensor(BinarySensorEntity, NapoleonHomeEntity):
+class NapoleonHomeConnectivityBinarySensor(BinarySensorEntity, NapoleonHomeEntity):
     """Binary sensor indicating whether the grill is BLE-connected and authenticated."""
 
     def __init__(

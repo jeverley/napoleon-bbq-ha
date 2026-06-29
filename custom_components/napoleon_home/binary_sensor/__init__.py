@@ -6,7 +6,11 @@ from typing import TYPE_CHECKING
 
 from custom_components.napoleon_home.const import PARALLEL_UPDATES as PARALLEL_UPDATES
 
-from .connected import ENTITY_DESCRIPTIONS as CONNECTED_DESCRIPTIONS, NapoleonHomeConnectedBinarySensor
+from .battery_saver_mode import (
+    ENTITY_DESCRIPTIONS as DISPLAY_POWER_SAVE_DESCRIPTIONS,
+    NapoleonHomeDisplayPowerSaveBinarySensor,
+)
+from .connectivity import ENTITY_DESCRIPTIONS as CONNECTIVITY_DESCRIPTIONS, NapoleonHomeConnectivityBinarySensor
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.data import NapoleonHomeConfigEntry
@@ -22,12 +26,19 @@ async def async_setup_entry(
     """Set up the binary_sensor platform."""
     for subentry_id, coordinator in entry.runtime_data.items():
         async_add_entities(
-            (
-                NapoleonHomeConnectedBinarySensor(
+            tuple(
+                NapoleonHomeConnectivityBinarySensor(
                     coordinator=coordinator,
                     entity_description=entity_description,
                 )
-                for entity_description in CONNECTED_DESCRIPTIONS
+                for entity_description in CONNECTIVITY_DESCRIPTIONS
+            )
+            + tuple(
+                NapoleonHomeDisplayPowerSaveBinarySensor(
+                    coordinator=coordinator,
+                    entity_description=entity_description,
+                )
+                for entity_description in DISPLAY_POWER_SAVE_DESCRIPTIONS
             ),
             config_subentry_id=subentry_id,
         )

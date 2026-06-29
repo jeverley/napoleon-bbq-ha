@@ -47,32 +47,34 @@ custom_components/napoleon_home/
 │
 ├── binary_sensor/
 │   ├── __init__.py
-│   ├── connected.py              # BLE connection state sensor
-│   └── probe_connected.py        # Per-probe physical connection sensor
+│   ├── connectivity.py           # BLE connection state sensor
+│   └── battery_saver_mode.py     # Battery saver mode diagnostic binary sensor
 │
 ├── button/
 │   ├── __init__.py
-│   └── turn_off.py               # Turn off grill button (TOFF property)
+│   └── power_off.py              # Power off grill button (TOFF property)
+│
+├── light/
+│   ├── __init__.py
+│   └── knob_lights.py            # Knob lights on/off (LCD_OFF)
 │
 ├── number/
 │   ├── __init__.py
+│   ├── automatic_shutoff.py      # Automatic shutoff timeout (AUTO_T_OUT, 1–24 h)
 │   └── target_temp.py            # Target temperature per probe (TRGT_TMP_*)
 │
 ├── select/
 │   ├── __init__.py
-│   ├── brightness.py             # Knob backlight brightness (BRT_LVL)
-│   ├── gas_unit.py               # Gas unit (GS_UNT: kg/lbs)
-│   └── temp_unit.py              # Temperature unit (TUNIT: °C/°F)
+│   ├── brightness.py             # Display brightness (BRT_LVL: low/medium/high)
+│   ├── tank_unit.py              # Tank unit (GS_UNT: kg/lbs)
+│   └── temperature_unit.py       # Temperature unit (TUNIT: °C/°F)
 │
 ├── sensor/
 │   ├── __init__.py
-│   ├── diagnostic.py             # Diagnostic sensors (RSSI, firmware version, etc.)
-│   └── probe_temp.py             # Probe temperature sensors (PRB_TMP_ONE–FOUR)
-│
-└── switch/
-    ├── __init__.py
-    ├── battery_saver.py          # Battery/screen saver mode (BSMODE)
-    └── lcd_off.py                # Knob backlights off (LCD_OFF)
+│   ├── battery.py                # Battery sensor
+│   ├── firmware.py               # Firmware version sensor
+│   ├── probe_temp.py             # Probe temperature sensors (PRB_TMP_ONE–FOUR)
+│   └── tank_weight.py            # Tank weight sensor (TNK_WT)
 ```
 
 ## Hub and Sub-entry Architecture
@@ -122,12 +124,12 @@ NapoleonHomeConfigEntry = ConfigEntry[NapoleonHomeCoordinators]
 
 **BLE connection details (`listeners.py`):**
 
-- Advertisement callback (`async_register_callback`) reconnects when the grill powers on
-- `_connect_and_run`: connects via `bleak-retry-connector`, settles MTU, subscribes to outbox, authenticates
+- Startup always waits for a genuine advertisement — `_async_setup` calls `_register_bt_callback` directly (no cached-device fast-path); `_skip_history_replay` suppresses the synchronous history-replay that `async_register_callback` fires on registration
+- `_connect_and_run`: connects via `bleak-retry-connector`, settles MTU, subscribes to outbox, authenticates; `BleakNotFoundError`/`TimeoutError` from `establish_connection` are caught cleanly and do not increment the failure counter
 - `_connecting: bool` guard prevents concurrent connection attempts from rapid advertisements
-- `MAX_CONNECT_FAILURES = 5` cap: after 5 consecutive failures, auto-reconnect stops; reload the entry to resume
-- `_authenticate()`: sends `Oac t:1`, awaits HMAC challenge, computes `Oac t:2`, waits for auth OK event
-- `_on_notification()`: routes `oac`, `gpr`, `Odp`, `opr`, `ukn` opcodes
+- `MAX_CONNECT_FAILURES = 5` cap: after 5 consecutive post-connect failures, `_circuit_open` stops auto-reconnect; reload the entry to resume; counter resets on successful auth **and** on clean disconnect from an authenticated session
+- `_authenticate()`: sends `Oac t:1`, awaits HMAC challenge, computes `Oac t:2`, waits for auth OK event; writes `_bsmode_desired` immediately after auth to restore display power-save state
+- `_on_notification()`: routes `oac`, `gpr`, `Odp`, `opr`, `ukn` opcodes; re-asserts `_bsmode_desired` if grill pushes `BSMODE=0` via `Odp`
 - `_send_msg()`: fragments payload, serialises concurrent writes through an `asyncio.Lock`
 
 **Key class:** `NapoleonHomeDataUpdateCoordinator` (exported from `coordinator/__init__.py`)

@@ -18,7 +18,6 @@ from custom_components.napoleon_home.config_flow_handler.schemas import CONF_POL
 from custom_components.napoleon_home.const import CONF_LOCAL_KEY, CONF_MAC, DOMAIN, LOGGER, POLL_INTERVAL_S
 from custom_components.napoleon_home.coordinator.listeners import NapoleonHomeBLEMixin
 from custom_components.napoleon_home.data import NapoleonHomeGrillState
-from homeassistant.components.bluetooth import async_ble_device_from_address
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 if TYPE_CHECKING:
@@ -86,23 +85,14 @@ class NapoleonHomeDataUpdateCoordinator(DataUpdateCoordinator[NapoleonHomeGrillS
         """
         Set up the coordinator before the first data refresh.
 
-        Initialises an empty grill state, then either connects immediately if the
-        grill is already advertising or registers an advertisement callback to
-        connect when the grill powers on.
+        Initialises an empty grill state, then registers the BLE advertisement
+        callback to connect when the grill powers on or is already advertising.
 
         This method is called automatically by Home Assistant during
         ``async_config_entry_first_refresh``.
         """
         self.data = NapoleonHomeGrillState()
-        device = async_ble_device_from_address(self.hass, self._mac, connectable=True)
-        if device is not None:
-            self.config_entry.async_create_background_task(
-                self.hass,
-                self._connect_and_run(device),
-                f"napoleon_home_connect_{self._mac}",
-            )
-        else:
-            self._register_bt_callback()
+        self._register_bt_callback()
         LOGGER.debug("Coordinator setup complete for Napoleon Home %s", self._mac)
 
     async def _async_update_data(self) -> NapoleonHomeGrillState:
