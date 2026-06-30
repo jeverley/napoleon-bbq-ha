@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/jeverley/napoleon-home-ha/compare/v0.6.0...v0.6.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* **napoleon_home:** BLE bonding detection, device removal, and devcontainer BT config ([176474d](https://github.com/jeverley/napoleon-home-ha/commit/176474dcffd837b8d46022b234a8b45f858f81ff))
+
 ## [0.6.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.5.0...v0.6.0) (2026-06-30)
 
 
