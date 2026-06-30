@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from custom_components.napoleon_home.const import CONF_DSN, CONF_MAC, DOMAIN, MANUFACTURER
+from custom_components.napoleon_home.const import CONF_DSN, DOMAIN, MANUFACTURER
 from homeassistant.helpers.device_registry import DeviceInfo
 
 if TYPE_CHECKING:
@@ -28,19 +28,19 @@ def build_device_info(coordinator: NapoleonHomeDataUpdateCoordinator) -> DeviceI
     the device registry entry persists across integration reinstalls.
 
     Args:
-        coordinator: The BLE coordinator for this sub-entry. Provides access
-            to the sub-entry data (MAC address, DSN) and title (grill name).
+        coordinator: The BLE coordinator for this grill. Provides MAC address,
+            device name, and DSN from the entry's device data dict.
 
     Returns:
         A ``DeviceInfo`` instance suitable for setting on
         ``_attr_device_info`` in any entity class.
 
     """
-    subentry = coordinator.subentry
+    device_data = coordinator.device_data
     return DeviceInfo(
-        identifiers={(DOMAIN, subentry.data[CONF_MAC])},
-        name=subentry.title,
+        identifiers={(DOMAIN, coordinator.mac)},
+        name=device_data["name"],
         manufacturer=MANUFACTURER,
         model="Prestige",
-        serial_number=subentry.data.get(CONF_DSN),
+        serial_number=device_data.get(CONF_DSN),
     )

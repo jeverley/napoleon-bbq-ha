@@ -28,7 +28,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
-    for subentry_id, coordinator in entry.runtime_data.items():
+    for coordinator in entry.runtime_data.values():
         async_add_entities(
             (
                 NapoleonHomeProbeTempSensor(
@@ -37,7 +37,6 @@ async def async_setup_entry(
                 )
                 for entity_description in PROBE_TEMP_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )
         async_add_entities(
             (
@@ -47,7 +46,6 @@ async def async_setup_entry(
                 )
                 for entity_description in BATTERY_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )
         async_add_entities(
             (
@@ -57,7 +55,6 @@ async def async_setup_entry(
                 )
                 for entity_description in FIRMWARE_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )
         async_add_entities(
             (
@@ -67,7 +64,6 @@ async def async_setup_entry(
                 )
                 for entity_description in TANK_WEIGHT_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )
         async_add_entities(
             (
@@ -77,5 +73,4 @@ async def async_setup_entry(
                 )
                 for entity_description in TANK_DEBUG_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )

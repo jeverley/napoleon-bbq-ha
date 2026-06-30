@@ -15,14 +15,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from custom_components.napoleon_home.config_flow_handler.schemas import CONF_POLL_INTERVAL
-from custom_components.napoleon_home.const import CONF_LOCAL_KEY, CONF_MAC, DOMAIN, LOGGER, POLL_INTERVAL_S
+from custom_components.napoleon_home.const import CONF_DEVICES, CONF_LOCAL_KEY, DOMAIN, LOGGER, POLL_INTERVAL_S
 from custom_components.napoleon_home.coordinator.listeners import NapoleonHomeBLEMixin
 from custom_components.napoleon_home.data import NapoleonHomeGrillState
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.data import NapoleonHomeConfigEntry
-    from homeassistant.config_entries import ConfigSubentry
 
 
 class NapoleonHomeDataUpdateCoordinator(DataUpdateCoordinator[NapoleonHomeGrillState], NapoleonHomeBLEMixin):
@@ -42,7 +41,6 @@ class NapoleonHomeDataUpdateCoordinator(DataUpdateCoordinator[NapoleonHomeGrillS
 
     Attributes:
         config_entry: The hub config entry for this integration instance.
-        subentry: The sub-entry containing this grill's MAC, DSN, and local key.
 
     """
 
@@ -52,7 +50,7 @@ class NapoleonHomeDataUpdateCoordinator(DataUpdateCoordinator[NapoleonHomeGrillS
         self,
         hass: Any,
         config_entry: NapoleonHomeConfigEntry,
-        subentry: ConfigSubentry,
+        mac: str,
     ) -> None:
         """
         Initialise the coordinator.
@@ -61,25 +59,31 @@ class NapoleonHomeDataUpdateCoordinator(DataUpdateCoordinator[NapoleonHomeGrillS
             hass: The Home Assistant instance.
             config_entry: The hub config entry (provides poll interval from options
                 and the background task helper).
-            subentry: The device sub-entry containing ``CONF_MAC`` and
-                ``CONF_LOCAL_KEY`` in its data.
+            mac: The BLE MAC address (``mac.lower()``) used as the key in
+                ``entry.data[CONF_DEVICES]``.
 
         """
         self._poll_interval: int = config_entry.options.get(CONF_POLL_INTERVAL, POLL_INTERVAL_S)
         super().__init__(
             hass,
             LOGGER,
-            name=f"{DOMAIN}_{subentry.data[CONF_MAC]}",
+            name=f"{DOMAIN}_{mac}",
             update_interval=None,
         )
         self.config_entry = config_entry
-        self._subentry = subentry
-        self._init_ble(subentry.data[CONF_MAC], subentry.data[CONF_LOCAL_KEY])
+        self._device_mac = mac
+        device_data = config_entry.data[CONF_DEVICES][mac]
+        self._init_ble(mac, device_data[CONF_LOCAL_KEY])
 
     @property
-    def subentry(self) -> ConfigSubentry:
-        """Return the device sub-entry associated with this coordinator."""
-        return self._subentry
+    def device_data(self) -> dict[str, Any]:
+        """Return the device dict from entry.data for this coordinator's grill."""
+        return self.config_entry.data[CONF_DEVICES][self._device_mac]
+
+    @property
+    def mac(self) -> str:
+        """Return the BLE MAC address (lower-case) for this grill."""
+        return self._device_mac
 
     async def _async_setup(self) -> None:
         """

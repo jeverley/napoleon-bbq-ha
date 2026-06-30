@@ -9,7 +9,9 @@ LOGGER: Logger = getLogger(__package__)
 DOMAIN = "napoleon_home"
 MANUFACTURER = "Napoleon"
 ATTRIBUTION = "Data provided by Napoleon Home"
-SUBENTRY_TYPE_DEVICE = "device"
+
+# entry.data key for the per-device dict (keyed by mac.lower())
+CONF_DEVICES = "devices"
 
 # Platform parallel updates - applied to all platforms
 PARALLEL_UPDATES = 1

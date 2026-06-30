@@ -22,7 +22,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the number platform."""
-    for subentry_id, coordinator in entry.runtime_data.items():
+    for coordinator in entry.runtime_data.values():
         async_add_entities(
             (
                 NapoleonHomeAutoShutoffNumber(
@@ -31,7 +31,6 @@ async def async_setup_entry(
                 )
                 for entity_description in AUTO_SHUTOFF_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )
         async_add_entities(
             (
@@ -41,7 +40,6 @@ async def async_setup_entry(
                 )
                 for entity_description in ENTITY_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )
         async_add_entities(
             (
@@ -51,5 +49,4 @@ async def async_setup_entry(
                 )
                 for entity_description in TANK_CALIBRATION_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )
