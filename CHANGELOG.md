@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.4.0...v0.5.0) (2026-06-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **napoleon_home:** remove ConfigSubentry in favour of flat entry.data[CONF_DEVICES]
+
+### Code Refactoring
+
+* **napoleon_home:** remove ConfigSubentry in favour of flat entry.data[CONF_DEVICES] ([2df63ee](https://github.com/jeverley/napoleon-home-ha/commit/2df63eed344090043f227cfa1787f42be37e1f04))
+
 ## [0.4.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.3.2...v0.4.0) (2026-06-29)
 
 
