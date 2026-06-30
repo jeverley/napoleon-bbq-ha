@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.5.0...v0.6.0) (2026-06-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **napoleon_home:** use uppercase MAC addresses throughout; migrate CONF_DEVICES keys to v3
+
+### Bug Fixes
+
+* **napoleon_home:** use uppercase MAC addresses throughout; migrate CONF_DEVICES keys to v3 ([598f7cd](https://github.com/jeverley/napoleon-home-ha/commit/598f7cde4d1bb58bd08700cd85861052f52169a5))
+
 ## [0.5.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.4.0...v0.5.0) (2026-06-30)
 
 
