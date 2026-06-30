@@ -42,9 +42,10 @@ Each configured grill exposes the following entities:
 
 ## Requirements
 
+- Home Assistant 2026.4.0 or later
 - [HACS](https://hacs.xyz/) installed in Home Assistant
 - A Napoleon app account with your Prestige grill registered
-- A Bluetooth adapter reachable by Home Assistant (built-in or USB)
+- A Bluetooth adapter reachable by Home Assistant (built-in, USB, or [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html) with active connections enabled)
 
 ## Installation
 
@@ -99,6 +100,16 @@ Ensure the grill is powered on and within Bluetooth range of your Home Assistant
 
 If the grill's local key expires, Home Assistant will prompt for your Napoleon app credentials. Go to **Settings → Devices & Services → Napoleon Home → Reconfigure** to re-enter them.
 
+### Grill bonded to another device
+
+Home Assistant will raise a repair issue if the grill rejects the Bluetooth bond. The grill must be factory reset to clear its existing bond before it will accept a new pairing. To resolve:
+
+1. **Factory reset the grill controller** to clear its existing Bluetooth bond (refer to your grill's manual for the reset procedure).
+2. Resolve the repair issue in Home Assistant — HA will re-pair and bond with the grill.
+3. Open the Napoleon app and re-provision the grill to restore cloud/app control.
+
+The grill accepts new BLE bonds before cloud provisioning is complete, so the Napoleon app can bond and provision in step 3. Once provisioned, the grill locks out further new bonds — both Home Assistant and the Napoleon app retain their existing bonds and coexist.
+
 ### Enable debug logging
 
 ```yaml
@@ -108,7 +119,7 @@ logger:
     custom_components.napoleon_home: debug
 ```
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please open an issue or pull request.
 
@@ -146,24 +157,24 @@ script/test     # Run tests
 </details>
 
 > [!NOTE]
-> **AI-assisted development:** This integration was developed with assistance from AI coding agents (Claude, GitHub Copilot). If you encounter unexpected behaviour, please [open an issue](../../issues).
+> **AI-assisted development:** This integration was developed with assistance from AI coding agents (Claude, GitHub Copilot).
 
 ---
 
-## 📄 License
+## License
 
 MIT — see [LICENSE](LICENSE).
 
 ---
 
-**Made with ❤️ by [@jeverley][user_profile]**
+**Made by [@jeverley][user_profile]**
 
 ---
 
 [commits-shield]: https://img.shields.io/github/commit-activity/y/jeverley/napoleon-home-ha.svg?style=for-the-badge
 [commits]: https://github.com/jeverley/napoleon-home-ha/commits/main
 [hacs]: https://github.com/hacs/integration
-[hacsbadge]: https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge
+[hacsbadge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
 [license-shield]: https://img.shields.io/github/license/jeverley/napoleon-home-ha.svg?style=for-the-badge
 [maintenance-shield]: https://img.shields.io/badge/maintainer-%40jeverley-blue.svg?style=for-the-badge
 [releases-shield]: https://img.shields.io/github/release/jeverley/napoleon-home-ha.svg?style=for-the-badge
