@@ -1,163 +1,137 @@
 # Examples
 
-This page provides ready-to-use examples for automations, dashboards, and blueprints
-with the Napoleon Home custom integration.
+Ready-to-use automations and dashboard cards for Napoleon Home.
 
-Replace entity IDs like `sensor.device_name_*` with your actual entity IDs after
-setting up the integration.
+Replace `your_grill` in entity IDs with your grill's actual device name
+(visible in **Settings** → **Devices & Services** → **Napoleon Home**).
 
 ## Automations
 
-### Notify when a sensor exceeds a threshold
+### Alert when a probe temperature exceeds a target
 
 ```yaml
 automation:
-  - alias: "Alert when sensor is high"
+  - alias: "Probe 1 reached target"
     trigger:
       - trigger: numeric_state
-        entity_id: sensor.device_name_air_quality
-        above: 100
+        entity_id: sensor.your_grill_probe_1_temperature
+        above: 75
     action:
       - action: notify.notify
         data:
-          title: "Air quality alert"
-          message: "Sensor value exceeded 100!"
+          title: "Grill ready"
+          message: "Probe 1 has reached {{ states('sensor.your_grill_probe_1_temperature') }}°"
 ```
 
-### Turn on a switch when connectivity is lost
+### Alert when grill goes offline
 
 ```yaml
 automation:
-  - alias: "React to connectivity loss"
+  - alias: "Grill disconnected"
     trigger:
       - trigger: state
-        entity_id: binary_sensor.device_name_connectivity
+        entity_id: binary_sensor.your_grill_status
         to: "off"
         for:
-          minutes: 5
+          minutes: 2
     action:
-      - action: switch.turn_off
-        target:
-          entity_id: switch.device_name_switch
+      - action: notify.notify
+        data:
+          title: "Grill offline"
+          message: "Napoleon grill is no longer reachable over Bluetooth."
 ```
 
-### Call a service action on schedule
+### Power off the grill at a scheduled time
 
 ```yaml
 automation:
-  - alias: "Reset filter counter weekly"
+  - alias: "Auto power off at midnight"
     trigger:
       - trigger: time
-        at: "03:00:00"
+        at: "00:00:00"
     condition:
-      - condition: time
-        weekday:
-          - mon
+      - condition: state
+        entity_id: binary_sensor.your_grill_status
+        state: "on"
     action:
-      - action: napoleon_home.example_service
+      - action: button.press
         target:
-          entity_id: button.device_name_reset_filter
+          entity_id: button.your_grill_power_off
 ```
 
-### Use a blueprint for threshold alerts
-
-Save this as a blueprint file and import it in Home Assistant:
+### Turn on knob lights at sunset
 
 ```yaml
-blueprint:
-  name: Napoleon Home — Threshold Alert
-  description: Send a notification when a sensor exceeds a configurable threshold.
-  domain: automation
-  input:
-    sensor_entity:
-      name: Sensor
-      selector:
-        entity:
-          domain: sensor
-          integration: napoleon_home
-    threshold:
-      name: Threshold value
-      selector:
-        number:
-          min: 0
-          max: 1000
-    notify_target:
-      name: Notification service
-      default: notify.notify
-      selector:
-        text:
-
-trigger:
-  - trigger: numeric_state
-    entity_id: !input sensor_entity
-    above: !input threshold
-
-action:
-  - action: !input notify_target
-    data:
-      message: >-
-        {{ state_attr(trigger.entity_id, 'friendly_name') }}
-        exceeded {{ threshold }} (current value: {{ trigger.to_state.state }}).
+automation:
+  - alias: "Knob lights at sunset"
+    trigger:
+      - trigger: sun
+        event: sunset
+    action:
+      - action: light.turn_on
+        target:
+          entity_id: light.your_grill_knob_lights
 ```
 
 ## Dashboard Cards
 
-### Sensor value card
-
-```yaml
-type: sensor
-entity: sensor.device_name_air_quality
-name: Air Quality
-graph: line
-```
-
-### Device summary — entities card
+### Temperature overview
 
 ```yaml
 type: entities
-title: My Device
+title: Grill temperatures
 entities:
-  - entity: sensor.device_name_air_quality
-    name: Air Quality
-  - entity: binary_sensor.device_name_connectivity
-    name: Connected
-  - entity: binary_sensor.device_name_filter
-    name: Filter Status
-  - entity: switch.device_name_switch
-    name: Power
-  - entity: select.device_name_fan_speed
-    name: Fan Speed
-  - entity: number.device_name_threshold
-    name: Threshold
+  - entity: sensor.your_grill_grill_temperature
+    name: Grill
+  - entity: sensor.your_grill_probe_1_temperature
+    name: Probe 1
+  - entity: sensor.your_grill_probe_2_temperature
+    name: Probe 2
+  - entity: sensor.your_grill_probe_3_temperature
+    name: Probe 3
 ```
 
-### Status badge — multiple entities
-
-```yaml
-type: glance
-title: Device Status
-entities:
-  - entity: binary_sensor.device_name_connectivity
-    name: Online
-  - entity: sensor.device_name_air_quality
-    name: Air Quality
-  - entity: binary_sensor.device_name_filter
-    name: Filter
-show_state: true
-```
-
-### History graph
+### Temperature history graph
 
 ```yaml
 type: history-graph
-title: Air Quality (last 24 h)
+title: Grill temperatures (last 2 h)
 entities:
-  - entity: sensor.device_name_air_quality
-hours_to_show: 24
+  - entity: sensor.your_grill_grill_temperature
+    name: Grill
+  - entity: sensor.your_grill_probe_1_temperature
+    name: Probe 1
+  - entity: sensor.your_grill_probe_2_temperature
+    name: Probe 2
+  - entity: sensor.your_grill_probe_3_temperature
+    name: Probe 3
+hours_to_show: 2
+```
+
+### Full grill status card
+
+```yaml
+type: entities
+title: Napoleon Prestige
+entities:
+  - entity: binary_sensor.your_grill_status
+    name: Status
+  - entity: sensor.your_grill_grill_temperature
+    name: Grill temp
+  - entity: sensor.your_grill_probe_1_temperature
+    name: Probe 1
+  - entity: sensor.your_grill_gas_tank_weight
+    name: Gas remaining
+  - entity: light.your_grill_knob_lights
+    name: Knob lights
+  - entity: select.your_grill_display_brightness
+    name: Brightness
+  - entity: button.your_grill_power_off
+    name: Power off
 ```
 
 ## Related Documentation
 
-- [Configuration Reference](./CONFIGURATION.md) - All configuration options
-- [Getting Started](./GETTING_STARTED.md) - Installation and initial setup
-- [GitHub Issues](https://github.com/jeverley/napoleon-home-ha/issues) - Report problems
+- [Configuration Reference](./CONFIGURATION.md) — Available options
+- [Getting Started](./GETTING_STARTED.md) — Installation and setup
+- [GitHub Issues](https://github.com/jeverley/napoleon-home-ha/issues) — Report problems

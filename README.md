@@ -66,11 +66,7 @@ Then click **Download** and **restart Home Assistant**.
 
 ## Setup
 
-If your grill is powered on and in range, Home Assistant will discover it automatically and prompt you to set it up. You can also add it manually:
-
-[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=napoleon_home)
-
-Or go to **Settings → Devices & Services → Add Integration** and search for **Napoleon Home**.
+This integration can only be added via Bluetooth discovery. Power on your grill and ensure it is within Bluetooth range — Home Assistant will detect it automatically and prompt you to set it up.
 
 ### During setup you will need
 
@@ -94,7 +90,7 @@ After setup, click **Configure** on the integration to adjust:
 
 ### Grill not discovered automatically
 
-Ensure the grill is powered on and within Bluetooth range of your Home Assistant host. You can add it manually using the **Grill MAC address** field during setup — the MAC is usually printed on a label on the grill controller.
+Ensure the grill is powered on and within Bluetooth range of your Home Assistant host. If using an ESPHome Bluetooth proxy, confirm it has active connections enabled. Discovery may take a minute or two after the grill powers on.
 
 ### Reauthentication
 
