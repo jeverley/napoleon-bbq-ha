@@ -8,6 +8,16 @@ if pgrep -x bluetoothd >/dev/null 2>&1; then
     sudo pkill -x bluetoothd 2>/dev/null || true
 fi
 
+# Configure BLE security settings — btmgmt discovers the default adapter automatically,
+# handles the MGMT response loop internally, and avoids the hardcoded-index-0 issue.
+#   bondable=on  — allow Just Works bonding so BlueZ can pair with the grill on first connect.
+#   secure-conn=on — negotiate LE Secure Connections with grill if it supports them.
+timeout 3 btmgmt bondable on 2>/dev/null || true
+timeout 3 btmgmt secure-conn on 2>/dev/null || true
+# Keep adapter permanently pairable (PairableTimeout=0) so BlueZ doesn't revert
+# bondable to off after the default 180-second countdown.
+bluetoothctl -- pairable on 2>/dev/null | grep -E "Changing|error" || true
+
 # Grant NET_ADMIN and NET_RAW to the real Python binary so Home Assistant
 # (running as vscode, not root) can open the Bluetooth management socket.
 # Docker's capAdd only grants capabilities to root; setcap propagates them

@@ -263,7 +263,7 @@ This integration uses a hub/sub-entry model — **not** a single-config-entry-pe
 - `ConfigFlowHandler` **must** implement `async_get_supported_subentry_types()` returning `{SUBENTRY_TYPE_DEVICE: NapoleonHomeGrillSubentryFlowHandler}`
 - When adding entities for a sub-entry, pass `config_subentry_id=subentry_id` to `AddConfigEntryEntitiesCallback` — omitting it silently attaches entities to the hub entry, breaking device attribution
 
-**MAC casing convention:** stored uppercase in config data (`CONF_MAC: "FF:EE:DD:CC:BB:AA"`), lowercase for unique IDs (`unique_id="ff:ee:dd:cc:bb:aa"`).
+**MAC casing convention:** stored uppercase everywhere — in config data (`CONF_DEVICES` keys: `"FF:EE:DD:CC:BB:AA"`) and in entity unique IDs (`unique_id="FF:EE:DD:CC:BB:AA_some_key"`).
 
 ### Device Info
 
@@ -373,7 +373,7 @@ See `.github/instructions/blueprint.config_flow.instructions.md` for comprehensi
 - Failure cap: `BleakNotFoundError`/`TimeoutError` from `establish_connection` (e.g. grill busy with another app) are caught before the outer failure counter and do not increment `_connect_failures`; `_connect_failures` resets to 0 after successful authentication **and** on clean disconnect from an authenticated session (so a powered-off grill doesn't accumulate failures toward the circuit breaker)
 - Library: `bleak-retry-connector` (`establish_connection` with `max_attempts=1` + `BleakClientWithServiceCache`); `establish_connection` handles slot-draining via `wait_for_disconnect` and error classification before raising; outer retry is per-advertisement-event via `_connect_failures`
 - `habluetooth` always injects FAST connection params (7.5 ms interval) via `HaBleakClient.connect()` regardless of the call path — this is expected HA behaviour, not a bug
-- **BLE bonding required:** INBOX writes require an encrypted link from a bonded peer (ATT error 0x05 otherwise). The integration calls `client.pair()` (with exception swallowing for already-bonded devices) before `start_notify`. On the first setup the host must bond before the Napoleon app provisions WiFi, to secure a grill bond slot.
+- **BLE bonding required:** INBOX writes require an encrypted link from a bonded peer (ATT error 0x05 otherwise). The integration calls `client.pair()` before `start_notify`. On first connect this triggers Just Works LE Secure Connections pairing — BlueZ handles the USER_CONFIRM_REQUEST automatically without a registered NoInputNoOutput agent (confirmed on Linux/BlueZ with `bleak-retry-connector`). On subsequent connects BlueZ uses the stored LTK and `pair()` returns immediately. Non-rejection exceptions from `pair()` (e.g. "already bonded") are swallowed and the code proceeds; `start_notify` then confirms whether the link is actually encrypted. A genuine SMP rejection (grill bonded to another device) raises `org.bluez.Error.AuthenticationFailed` or `org.bluez.Error.AuthenticationRejected` and is caught by `_is_pairing_rejected` → `NapoleonHomeAlreadyBondedError`.
 - **HMAC formula (confirmed by hardware test):** `HMAC-SHA256(key=local_key.encode("utf-8"), msg=b"response" + base64.b64decode(challenge_b64))`. The key is the raw local_key string encoded as UTF-8 — do NOT base64-decode it. A wrong HMAC causes the grill to return `s:4` on the `oac t:2` response and `s:3` on all subsequent `Gpr` requests.
 
 **Prestige property sentinels and bitmasks:**
