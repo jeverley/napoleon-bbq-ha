@@ -136,29 +136,37 @@ setup time to authenticate and fetch the per-device BLE `local_key`.
 
 ---
 
-### Hub/Sub-entry Architecture (multi-grill support)
+### Multi-Grill Architecture (flat CONF_DEVICES dict)
 
-**Date:** 2026-06-22
+**Date:** 2026-06-22 (initial); revised 2026-06-30
 
 **Context:** Users may own multiple Napoleon grills under one Ayla account. The template's
-"Future Considerations" noted "Multi-Device Support" as not yet implemented.
+"Future Considerations" noted "Multi-Device Support" as not yet implemented. An initial
+`ConfigSubentry`-per-grill approach was shipped in v1, then replaced in v2 after HA subentry
+APIs proved unsuitable for reauth and options-flow management of device credentials.
 
-**Decision:** One config entry per Napoleon account (the hub), one `ConfigSubentry` per grill.
-`entry.runtime_data` is `dict[str, NapoleonHomeDataUpdateCoordinator]` keyed by `subentry_id`.
+**Decision:** One config entry per Napoleon account. All device data lives in
+`entry.data[CONF_DEVICES]`: a `dict[str, Any]` keyed by `mac.lower()`, each value holding
+`{CONF_DSN, CONF_LOCAL_KEY, CONF_LOCAL_KEY_ID, "name"}`. Migrated in `async_migrate_entry`
+(v1 → v2).
+
+`entry.runtime_data` is `dict[str, NapoleonHomeDataUpdateCoordinator]` keyed by `mac.lower()`.
 
 **Rationale:**
 
-- Correct HA pattern for a hub-with-devices model
-- Reauth refreshes `local_key` for all grills in a single sign-in round-trip
-- `async_get_supported_subentry_types` allows adding grills post-setup without a full re-setup
-- Sub-entry unique ID (lowercase MAC) prevents duplicate grill registration across entries
+- Reauth refreshes `local_key` for all grills in a single sign-in round-trip using one dict update
+- Add/remove grill handled entirely in the options flow via `async_update_entry` — no subentry lifecycle
+- MAC-keyed dict makes coordinator lookup by address O(1) (used in repair flows and entity setup)
+- Simpler migration path: v2 entries are plain dicts, no subentry removal required for future changes
 
 **Consequences:**
 
 - Resolves "Multi-Device Support" future consideration (see below)
-- Entities must pass `config_subentry_id=subentry_id` to `AddConfigEntryEntitiesCallback`
+- Entities no longer pass `config_subentry_id` — all entities belong to the single config entry
 - `entry.runtime_data` is a dict, not a single coordinator — blueprint entity patterns need
   adaptation (iterate `runtime_data.items()` in platform `async_setup_entry`)
+- `repairs.py` looks up the affected coordinator via `entry.runtime_data.get(mac)` using the MAC
+  stored in the repair issue data
 
 ---
 
@@ -231,7 +239,7 @@ Consider implementing state restoration for switches and configurable settings t
 
 ### Multi-Device Support
 
-**Status:** Resolved — see [Hub/Sub-entry Architecture](#hubsub-entry-architecture-multi-grill-support) decision (2026-06-22)
+**Status:** Resolved — see [Multi-Grill Architecture](#multi-grill-architecture-flat-conf_devices-dict) decision (2026-06-22, revised 2026-06-30)
 
 ### Polling vs. Push
 
