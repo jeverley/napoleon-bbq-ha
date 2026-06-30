@@ -168,7 +168,7 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     """
 
-    VERSION = 2
+    VERSION = 3
     MINOR_VERSION = 1
 
     @staticmethod
@@ -228,9 +228,8 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             discovery_info.address,
             discovery_info.name,
         )
-        mac_lower = discovery_info.address.lower()
         for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if mac_lower in entry.data.get(CONF_DEVICES, {}):
+            if discovery_info.address.upper() in entry.data.get(CONF_DEVICES, {}):
                 LOGGER.info(
                     "Napoleon Home: setup_stage=bluetooth_step_abort reason=already_configured address=%s",
                     discovery_info.address,
@@ -586,7 +585,6 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             raise HomeAssistantError(msg)
 
         self._mac = mac
-        mac_lower = mac.lower()
         hub_unique_id = f"{self._username.lower()}_{self._region_key}"
         LOGGER.info(
             "Napoleon Home: setup_stage=finish dsn=%s mac=%s hub_unique_id=%s",
@@ -616,9 +614,9 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         if existing_hub is not None:
-            if mac_lower in existing_hub.data.get(CONF_DEVICES, {}):
+            if mac in existing_hub.data.get(CONF_DEVICES, {}):
                 return self.async_abort(reason="already_configured")
-            updated_devices = {**existing_hub.data.get(CONF_DEVICES, {}), mac_lower: device_data}
+            updated_devices = {**existing_hub.data.get(CONF_DEVICES, {}), mac: device_data}
             self.hass.config_entries.async_update_entry(
                 existing_hub,
                 data={**existing_hub.data, **hub_data, CONF_DEVICES: updated_devices},
@@ -630,7 +628,7 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_create_entry(
             title=f"Napoleon Home ({self._username})",
-            data={**hub_data, CONF_DEVICES: {mac_lower: device_data}},
+            data={**hub_data, CONF_DEVICES: {mac: device_data}},
         )
 
     async def _async_resolve_valid_mac(self, device_name: str) -> list[str]:
