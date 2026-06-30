@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.6.1...v1.0.0) (2026-06-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* implement local BLE integration for Napoleon Home
+
+### Features
+
+* implement local BLE integration for Napoleon Home ([c7561ff](https://github.com/jeverley/napoleon-home-ha/commit/c7561ffd6674cbc4613ab4e3cbf452aa8c0d8027))
+
 ## [0.6.1](https://github.com/jeverley/napoleon-home-ha/compare/v0.6.0...v0.6.1) (2026-06-30)
 
 
