@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.6.1...v0.7.0) (2026-06-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* rewrites BLE session management, device removal, and devcontainer BLE configuration. Previous config entries at VERSION 3 remain compatible; earlier versions are no longer migrated.
+
+### Features
+
+* initial stable release ([ce681da](https://github.com/jeverley/napoleon-home-ha/commit/ce681da0bb7c589ffd1e9b84fd18db6573d7788a))
+
 ## [0.6.1](https://github.com/jeverley/napoleon-home-ha/compare/v0.6.0...v0.6.1) (2026-06-30)
 
 
