@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/jeverley/napoleon-home-ha/compare/v1.0.0...v1.1.0) (2026-06-30)
+
+
+### Features
+
+* **napoleon_home:** add brand icons ([2afcac7](https://github.com/jeverley/napoleon-home-ha/commit/2afcac733f9ae69198d0004a19285ad913e86c4b))
+
 ## [1.0.0](https://github.com/jeverley/napoleon-home-ha/compare/v0.6.1...v1.0.0) (2026-06-30)
 
 
