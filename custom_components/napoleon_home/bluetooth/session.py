@@ -17,6 +17,7 @@ import contextlib
 from typing import Any, Self
 
 from bleak.backends.device import BLEDevice
+from bleak.exc import BleakDBusError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from custom_components.napoleon_home.bluetooth.errors import (
@@ -48,10 +49,26 @@ _AUTH_REJECTED = "rejected"
 _AUTH_ACCEPTED = "accepted"
 
 
+_BLUEZ_PAIRING_REJECTED = frozenset(
+    {
+        "org.bluez.Error.AuthenticationFailed",
+        "org.bluez.Error.AuthenticationRejected",
+    }
+)
+
+
 def _is_att_insufficient_auth(err: Exception) -> bool:
-    """Return True if the exception indicates ATT Insufficient Authentication (0x05)."""
-    msg = str(err).lower()
-    return "0x05" in msg or "insufficient authentication" in msg or "insufficient auth" in msg
+    """Return True if the exception is a BlueZ ATT Insufficient Authentication error (0x05)."""
+    return (
+        isinstance(err, BleakDBusError)
+        and err.dbus_error == "org.bluez.Error.Failed"
+        and (err.dbus_error_details or "").startswith("ATT error: 0x05")
+    )
+
+
+def _is_pairing_rejected(err: Exception) -> bool:
+    """Return True if BlueZ rejected pairing (grill bonded to another device)."""
+    return isinstance(err, BleakDBusError) and err.dbus_error in _BLUEZ_PAIRING_REJECTED
 
 
 class NapoleonHomeBLESession:
@@ -182,10 +199,21 @@ class NapoleonHomeBLESession:
         try:
             await self._client.pair()
             LOGGER.debug("Napoleon Home %s: BLE link bonded/encrypted", self._mac)
-        except Exception:  # noqa: BLE001
+        except Exception as err:
+            if _is_pairing_rejected(err):
+                raise NapoleonHomeAlreadyBondedError(
+                    f"Napoleon Home {self._mac}: grill rejected pairing (bonded to another device)"
+                ) from err
             LOGGER.debug("Napoleon Home %s: pair() raised — proceeding (already bonded?)", self._mac)
 
-        await self._client.start_notify(OUTBOX_UUID, self._on_bleak_notification)
+        try:
+            await self._client.start_notify(OUTBOX_UUID, self._on_bleak_notification)
+        except Exception as err:
+            if _is_att_insufficient_auth(err):
+                raise NapoleonHomeAlreadyBondedError(
+                    f"Napoleon Home {self._mac}: grill refuses bond (ATT 0x05)"
+                ) from err
+            raise
 
         # Negotiate a large MTU so the full Oac payload fits in one write.
         _acquire = getattr(getattr(self._client, "_backend", self._client), "_acquire_mtu", None)

@@ -20,9 +20,6 @@ node_modules/
 # AI agent temporary scratch files and planning notes
 .ai-scratch/
 
-# Handover / research artefacts — may contain real credentials, never commit
-_handover/
-
 # Runtime artifact created by the template-sync workflow (never commit)
 .templatesyncignore.runtime
 
@@ -251,3 +248,8 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/linux,macos,windows,virtualenv,pythonvanilla,visualstudiocode,homeassistant
+ble_client.py
+source.zip
+btmon_live.log
+ble_session_*.log
+.claude/

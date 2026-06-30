@@ -232,6 +232,9 @@ class NapoleonHomeBLEMixin:
                 self._connecting = False
                 self._on_disconnect(None)
                 return
+            except Exception:
+                await session.disconnect()
+                raise
 
             if self._stopping:
                 # Shutdown raced the connect; disconnect cleanly without counting a failure.
