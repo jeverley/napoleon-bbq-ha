@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "key_retrieval": {
+        "title": "Connect to Napoleon Home",
+        "description": "Enter your Napoleon app account credentials to retrieve the local key for **{name}**.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "region": "Region"
+        }
+      },
+      "factory_reset_guide": {
+        "title": "Factory reset required",
+        "description": "**{name}** is already provisioned and no longer accepts new Bluetooth bonds.\n\nTo add this grill to Home Assistant you must first factory reset it:\n\n1. On the grill, hold the **Menu** and **Select** buttons simultaneously until the display resets\n2. The grill will return to its factory state\n3. Tap **Continue** — you will then be guided through provisioning",
+        "submit": "Continue"
+      },
+      "provision_guide": {
+        "title": "Provision your grill",
+        "description": "**{name}** hasn't been set up yet.\n\n1. Open the **Napoleon** app on your phone\n2. Add and provision the grill (follow the in-app instructions)\n3. Once setup is complete, **close the Napoleon app**\n4. Return here and tap **Continue**",
+        "submit": "Continue"
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Napoleon Home",
+        "description": "The local key for {name} needs to be refreshed. Enter your Napoleon app account credentials.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "region": "Region"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials. Check your Napoleon app email and password.",
+      "cannot_connect": "Failed to connect to the Napoleon cloud. Check your internet connection.",
+      "no_devices_found": "No Napoleon Prestige grills found in your account.",
+      "already_bonded": "Grill no longer accepts new Bluetooth bonds — factory reset the grill first.",
+      "ble_not_provisioned": "Grill is not provisioned — please complete setup in the Napoleon app first.",
+      "ble_discovery_required": "Couldn't determine the grill Bluetooth address. Start setup from Bluetooth discovery by powering on the grill and adding it when detected.",
+      "ble_key_rejected": "BLE key rejected by grill — the local key may have rotated. Try reauthenticating.",
+      "reset_not_detected": "Grill is still bonded to another device. Confirm the factory reset completed (hold ignition ~10 s until the grill beeps) then try again.",
+      "unknown": "Unexpected error. Check the Home Assistant logs for details."
+    },
+    "abort": {
+      "already_configured": "This Napoleon Home grill is already configured.",
+      "device_added_to_account": "The Napoleon Home grill has been added to your existing account.",
+      "discovery_required": "This integration can only be added via Bluetooth discovery. Power on your grill and it will appear automatically."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Napoleon Home",
+        "menu_options": {
+          "settings": "Settings",
+          "add_grill": "Add grill",
+          "remove_grill": "Remove grill"
+        }
+      },
+      "settings": {
+        "title": "Napoleon Home options",
+        "data": {
+          "poll_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "poll_interval": "How often to request a full property update from the grill while connected."
+        }
+      },
+      "add_grill": {
+        "title": "Add Napoleon Home grill",
+        "description": "Enter your Napoleon app account password to add another grill ({username}).",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "pick_grill": {
+        "title": "Select grill",
+        "description": "Multiple unconfigured Napoleon Prestige grills were found. Select the one to add.",
+        "data": {
+          "dsn": "Grill"
+        }
+      },
+      "remove_grill": {
+        "title": "Remove Napoleon Home grill",
+        "description": "Select the grill to remove from Home Assistant.",
+        "data": {
+          "mac": "Grill"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials. Check your Napoleon app email and password.",
+      "cannot_connect": "Failed to connect to the Napoleon cloud. Check your internet connection.",
+      "unknown": "Unexpected error. Check the Home Assistant logs for details."
+    },
+    "abort": {
+      "grill_added": "The Napoleon Home grill has been added.",
+      "grill_removed": "The Napoleon Home grill has been removed.",
+      "no_devices_found": "No unconfigured Napoleon Prestige grills found in your account."
+    }
+  },
+  "exceptions": {
+    "update_failed": {
+      "message": "Failed to poll properties from the Napoleon Home grill."
+    },
+    "ble_auth_rejected": {
+      "message": "BLE key rejected by grill — the local key has rotated. Please reauthenticate."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "battery_saver_mode": {
+        "name": "Battery saver mode"
+      },
+      "status": {
+        "name": "Status"
+      }
+    },
+    "sensor": {
+      "probe_1": {
+        "name": "Probe 1"
+      },
+      "probe_2": {
+        "name": "Probe 2"
+      },
+      "probe_3": {
+        "name": "Probe 3"
+      },
+      "grill": {
+        "name": "Grill"
+      },
+      "battery": {
+        "name": "Battery"
+      },
+      "tank_weight": {
+        "name": "Tank weight"
+      },
+      "gas_tank_name": {
+        "name": "Tank name"
+      },
+      "region": {
+        "name": "Region"
+      },
+      "country": {
+        "name": "Country"
+      },
+      "firmware": {
+        "name": "Firmware"
+      }
+    },
+    "light": {
+      "knob_lights": {
+        "name": "Knob lights"
+      }
+    },
+    "select": {
+      "temperature_unit": {
+        "name": "Temperature unit",
+        "state": {
+          "celsius": "Celsius",
+          "fahrenheit": "Fahrenheit"
+        }
+      },
+      "tank_unit": {
+        "name": "Tank unit",
+        "state": {
+          "kg": "Kilograms",
+          "lbs": "Pounds"
+        }
+      },
+      "display_brightness": {
+        "name": "Display brightness",
+        "state": {
+          "low": "Low",
+          "medium": "Medium",
+          "high": "High"
+        }
+      }
+    },
+    "number": {
+      "automatic_shutoff": {
+        "name": "Automatic shutoff"
+      },
+      "probe_1_target": {
+        "name": "Probe 1 target"
+      },
+      "probe_2_target": {
+        "name": "Probe 2 target"
+      },
+      "probe_3_target": {
+        "name": "Probe 3 target"
+      },
+      "grill_target": {
+        "name": "Grill target"
+      },
+      "empty_tank_weight": {
+        "name": "Empty tank weight"
+      },
+      "full_tank_weight": {
+        "name": "Full tank weight"
+      }
+    },
+    "button": {
+      "power_off": {
+        "name": "Power off"
+      }
+    }
+  },
+  "issues": {
+    "already_bonded": {
+      "title": "Grill bonded to another device",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Restore connection to {name}",
+            "description": "{name} is rejecting BLE connection (ATT 0x05) — it has been bonded to another device. Factory reset the grill, then click Submit to restore the connection."
+          }
+        }
+      }
+    },
+    "not_provisioned": {
+      "title": "Grill not provisioned",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Restore connection to {name}",
+            "description": "{name} reports it is not provisioned (s:6). Open the Napoleon app and provision the grill, then click Submit to restore the connection."
+          }
+        }
+      }
+    }
+  }
+}
