@@ -78,14 +78,15 @@ def _remove_stale_entities(hass: HomeAssistant, entry: NapoleonHomeConfigEntry) 
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: NapoleonHomeConfigEntry) -> bool:
-    """Migrate config entry from v1 (subentry per device) to v2 (flat devices dict)."""
+    """Migrate old config entry versions to the current schema."""
     if entry.version == 1:
+        # v1 → v3: flatten subentries into entry.data[CONF_DEVICES] keyed by uppercase MAC.
         devices: dict[str, Any] = {}
         device_subentry_ids: list[str] = []
         for subentry in list(entry.subentries.values()):
             if subentry.subentry_type != _SUBENTRY_TYPE_DEVICE:
                 continue
-            mac = subentry.data[CONF_MAC].lower()
+            mac = subentry.data[CONF_MAC].upper()
             devices[mac] = {
                 CONF_DSN: subentry.data.get(CONF_DSN, ""),
                 CONF_LOCAL_KEY: subentry.data.get(CONF_LOCAL_KEY, ""),
@@ -96,11 +97,20 @@ async def async_migrate_entry(hass: HomeAssistant, entry: NapoleonHomeConfigEntr
         hass.config_entries.async_update_entry(
             entry,
             data={**entry.data, CONF_DEVICES: devices},
-            version=2,
+            version=3,
             minor_version=1,
         )
         for subentry_id in device_subentry_ids:
             hass.config_entries.async_remove_subentry(entry, subentry_id)
+    elif entry.version == 2:
+        # v2 → v3: uppercase CONF_DEVICES keys (were stored lowercase in v2).
+        devices_v2 = entry.data.get(CONF_DEVICES, {})
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, CONF_DEVICES: {mac.upper(): data for mac, data in devices_v2.items()}},
+            version=3,
+            minor_version=1,
+        )
     return True
 
 

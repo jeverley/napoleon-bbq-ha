@@ -230,11 +230,10 @@ class NapoleonHomeOptionsFlow(config_entries.OptionsFlow):
             msg = f"Napoleon Home {dsn}: cannot add grill without BLE MAC"
             raise HomeAssistantError(msg)
 
-        mac_lower = mac.lower()
         entry = self.config_entry
         updated_devices = {
             **entry.data.get(CONF_DEVICES, {}),
-            mac_lower: {
+            mac: {
                 CONF_DSN: dsn,
                 CONF_LOCAL_KEY: local_key,
                 CONF_LOCAL_KEY_ID: local_key_id,
