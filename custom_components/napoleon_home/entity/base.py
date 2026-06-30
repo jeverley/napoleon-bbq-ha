@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from custom_components.napoleon_home.const import ATTRIBUTION, CONF_MAC
+from custom_components.napoleon_home.const import ATTRIBUTION
 from custom_components.napoleon_home.coordinator import NapoleonHomeDataUpdateCoordinator
 from custom_components.napoleon_home.entity_utils.device_info import build_device_info
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -65,7 +65,7 @@ class NapoleonHomeEntity(CoordinatorEntity[NapoleonHomeDataUpdateCoordinator]):
         """
         super().__init__(coordinator)
         self.entity_description = entity_description
-        self._attr_unique_id = f"{coordinator.subentry.data[CONF_MAC].lower()}_{entity_description.key}"
+        self._attr_unique_id = f"{coordinator.mac}_{entity_description.key}"
         self._attr_device_info = build_device_info(coordinator)
 
     @property

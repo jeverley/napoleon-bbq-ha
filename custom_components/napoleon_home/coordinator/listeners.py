@@ -31,7 +31,15 @@ from custom_components.napoleon_home.bluetooth import (
     NapoleonHomeBLESession,
     NapoleonHomeNotProvisionedError,
 )
-from custom_components.napoleon_home.const import LOGGER, MAX_CONNECT_FAILURES, POLL_PROPS, PROP_BSMODE, PROP_TYPE_BOOL
+from custom_components.napoleon_home.const import (
+    CONF_DEVICES,
+    DOMAIN,
+    LOGGER,
+    MAX_CONNECT_FAILURES,
+    POLL_PROPS,
+    PROP_BSMODE,
+    PROP_TYPE_BOOL,
+)
 from homeassistant.components.bluetooth import (
     BluetoothChange,
     BluetoothScanningMode,
@@ -41,10 +49,15 @@ from homeassistant.components.bluetooth import (
 )
 from homeassistant.core import CALLBACK_TYPE, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.data import NapoleonHomeConfigEntry, NapoleonHomeGrillState
     from homeassistant.core import HomeAssistant
+
+
+def _issue_id(prefix: str, mac: str) -> str:
+    return f"{prefix}_{mac.replace(':', '_').lower()}"
 
 
 class NapoleonHomeBLEMixin:
@@ -235,9 +248,11 @@ class NapoleonHomeBLEMixin:
 
             await session.authenticate(self._local_key)
 
-            # Auth succeeded.
+            # Auth succeeded — clear any open repair issues.
             self._authenticated = True
             self._connect_failures = 0
+            ir.async_delete_issue(self.hass, DOMAIN, _issue_id("already_bonded", self._mac))
+            ir.async_delete_issue(self.hass, DOMAIN, _issue_id("not_provisioned", self._mac))
             self.update_interval = timedelta(seconds=self._poll_interval)
             self.config_entry.async_create_background_task(
                 self.hass,
@@ -247,21 +262,24 @@ class NapoleonHomeBLEMixin:
             await self._async_apply_post_auth_defaults()
 
         except NapoleonHomeNotProvisionedError:
-            # Not a key/connection error — grill is reachable but not set up yet.
-            # Don't count this as a failure; just wait for the next advertisement
-            # after the user completes provisioning via the Napoleon app.
             LOGGER.warning(
-                "Napoleon Home %s: grill not provisioned (s:6) — waiting for provisioning via Napoleon app",
+                "Napoleon Home %s: grill not provisioned (s:6) — provision via Napoleon app then confirm the repair",
                 self._mac,
             )
-            if self._session is not None:
-                session_ref = self._session
-                self._session = None
-                self._authenticated = False
-                with contextlib.suppress(Exception):
-                    await session_ref.disconnect()
-            else:
-                self._on_disconnect(None)
+            self._circuit_open = True
+            device_name = self.config_entry.data.get(CONF_DEVICES, {}).get(self._mac, {}).get("name", self._mac)
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                _issue_id("not_provisioned", self._mac),
+                is_fixable=True,
+                is_persistent=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="not_provisioned",
+                translation_placeholders={"name": device_name},
+                data={"entry_id": self.config_entry.entry_id, "mac": self._mac},
+            )
+            await self._disconnect_session()
 
         except ConfigEntryAuthFailed:
             LOGGER.warning(
@@ -269,31 +287,29 @@ class NapoleonHomeBLEMixin:
                 self._mac,
             )
             self.config_entry.async_start_reauth(self.hass)
-            if self._session is not None:
-                session_ref = self._session
-                self._session = None
-                self._authenticated = False
-                with contextlib.suppress(Exception):
-                    await session_ref.disconnect()
-            else:
-                self._on_disconnect(None)
+            await self._disconnect_session()
             return
 
         except NapoleonHomeAlreadyBondedError:
             LOGGER.error(
                 "Napoleon Home %s: grill is bonded to another device (ATT 0x05) — "
-                "factory reset the grill and reload this integration entry to reconnect",
+                "factory reset the grill then confirm the repair in HA",
                 self._mac,
             )
             self._circuit_open = True
-            if self._session is not None:
-                session_ref = self._session
-                self._session = None
-                self._authenticated = False
-                with contextlib.suppress(Exception):
-                    await session_ref.disconnect()
-            else:
-                self._on_disconnect(None)
+            device_name = self.config_entry.data.get(CONF_DEVICES, {}).get(self._mac, {}).get("name", self._mac)
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                _issue_id("already_bonded", self._mac),
+                is_fixable=True,
+                is_persistent=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="already_bonded",
+                translation_placeholders={"name": device_name},
+                data={"entry_id": self.config_entry.entry_id, "mac": self._mac},
+            )
+            await self._disconnect_session()
             return
 
         except Exception:  # noqa: BLE001
@@ -306,28 +322,35 @@ class NapoleonHomeBLEMixin:
                     self._connect_failures,
                 )
                 self._circuit_open = True
-                if self._session is not None:
-                    session_ref = self._session
-                    self._session = None
-                    self._authenticated = False
-                    with contextlib.suppress(Exception):
-                        await session_ref.disconnect()
+                await self._disconnect_session()
             else:
                 LOGGER.warning(
                     "Napoleon Home %s: connection attempt failed — will retry on next advertisement", self._mac
                 )
-                if self._session is not None:
-                    session_ref = self._session
-                    self._session = None
-                    self._authenticated = False
-                    try:
-                        await session_ref.disconnect()
-                    except Exception:  # noqa: BLE001
-                        self._on_disconnect(None)
-                else:
-                    self._on_disconnect(None)
+                await self._disconnect_session(notify_on_error=True)
         finally:
             self._connecting = False
+
+    async def _disconnect_session(self, *, notify_on_error: bool = False) -> None:
+        """Disconnect the active session and reset auth state.
+
+        If no session is active, calls _on_disconnect directly so the BT
+        callback is re-registered (unless the circuit is open or we are stopping).
+        When notify_on_error=True, also calls _on_disconnect if the disconnect
+        call itself raises (used on non-fatal retry paths to keep the reconnect
+        cycle alive).
+        """
+        if self._session is not None:
+            session_ref = self._session
+            self._session = None
+            self._authenticated = False
+            try:
+                await session_ref.disconnect()
+            except Exception:  # noqa: BLE001
+                if notify_on_error:
+                    self._on_disconnect(None)
+        else:
+            self._on_disconnect(None)
 
     async def _async_apply_post_auth_defaults(self) -> None:
         """Apply desired defaults after authentication without affecting auth success."""
@@ -340,6 +363,13 @@ class NapoleonHomeBLEMixin:
                 self._bsmode_desired,
                 err,
             )
+
+    @callback
+    def async_close_circuit(self) -> None:
+        """Re-enable BLE reconnection after a circuit-breaker repair is confirmed."""
+        self._circuit_open = False
+        if not self._stopping and not self.connected and not self._connecting:
+            self._register_bt_callback()
 
     @callback
     def _on_disconnect(self, client: BleakClientWithServiceCache | None) -> None:

@@ -20,7 +20,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the button platform."""
-    for subentry_id, coordinator in entry.runtime_data.items():
+    for coordinator in entry.runtime_data.values():
         async_add_entities(
             (
                 NapoleonHomePowerOffButton(
@@ -29,5 +29,4 @@ async def async_setup_entry(
                 )
                 for entity_description in ENTITY_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )

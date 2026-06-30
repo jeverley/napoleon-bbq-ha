@@ -5,12 +5,11 @@ This module implements the configuration flow for initial hub setup via BLE
 discovery, plus reauthentication when local keys need refreshing.
 
 The integration uses a hub model: one config entry per Napoleon account, with
-one sub-entry per Napoleon Prestige grill. Each sub-entry stores the grill's
-BLE MAC address, Ayla DSN, BLE local key, and key ID.
+per-device data stored in ``entry.data[CONF_DEVICES]`` keyed by MAC address.
 
 Setup flow (BLE discovery — only supported path):
     1. ``async_step_bluetooth``: Grill advertisement fires. MAC checked against
-       existing sub-entries; aborts if already configured. Probes provisioning
+       existing devices; aborts if already configured. Probes provisioning
        state via BLE (DSN read from open GATT characteristic in the same session):
          - s:6 (not provisioned) → ``async_step_provision_guide``
          - ATT 0x05 (bonded to another device) → ``async_step_factory_reset_guide``
@@ -24,7 +23,7 @@ Setup flow (BLE discovery — only supported path):
     4. ``async_step_key_retrieval``: User enters Napoleon account credentials.
        Device matched by DSN (from GATT read) when known; otherwise every account
        device's key is tried against the grill via real BLE auth until one is
-       accepted. Hub entry and sub-entry created on success.
+       accepted. Hub entry and device data created on success.
 
 Manual setup (``async_step_user``) is not supported — aborts with
 ``discovery_required``. The grill must be discovered via BLE advertisement.
@@ -32,7 +31,7 @@ Manual setup (``async_step_user``) is not supported — aborts with
 Reauth flow:
     - Triggered when a coordinator raises ``ConfigEntryAuthFailed`` (e.g. on
       ``s:4`` BLE rejection or revoked refresh token).
-    - User re-enters credentials; local keys refreshed for ALL sub-entries in
+    - User re-enters credentials; local keys refreshed for ALL devices in
       a single sign-in round-trip.
 
 For more information:
@@ -41,7 +40,6 @@ https://developers.home-assistant.io/docs/config_entries_config_flow_handler
 
 from __future__ import annotations
 
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from bleak.exc import BleakError
@@ -64,15 +62,14 @@ from custom_components.napoleon_home.const import (
     AYLA_REGION_US,
     AYLA_REGIONS,
     CONF_ACCESS_TOKEN,
+    CONF_DEVICES,
     CONF_DSN,
     CONF_LOCAL_KEY,
     CONF_LOCAL_KEY_ID,
-    CONF_MAC,
     CONF_REFRESH_TOKEN,
     CONF_TOKEN_EXPIRY,
     DOMAIN,
     LOGGER,
-    SUBENTRY_TYPE_DEVICE,
 )
 from homeassistant import config_entries
 from homeassistant.components.bluetooth import (
@@ -95,7 +92,6 @@ from homeassistant.helpers.selector import (
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.config_flow_handler.options_flow import NapoleonHomeOptionsFlow
-    from custom_components.napoleon_home.config_flow_handler.subentry_flow import NapoleonHomeGrillSubentryFlowHandler
 
 _REGION_OPTIONS = [
     SelectOptionDict(value=AYLA_REGION_EU, label="Europe"),
@@ -162,9 +158,9 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     Handle a config flow for napoleon_home.
 
     Creates a hub config entry (one per Napoleon account) with the first
-    Napoleon Prestige grill as a sub-entry. Additional grills can be added
-    via the sub-entry flow. Supports reauthentication for refreshing expired
-    credentials.
+    Napoleon Prestige grill stored in ``entry.data[CONF_DEVICES]``. Additional
+    grills can be added via the options flow. Supports reauthentication for
+    refreshing expired credentials.
 
     Attributes:
         VERSION: Config entry schema major version.
@@ -172,28 +168,8 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     """
 
-    VERSION = 1
+    VERSION = 2
     MINOR_VERSION = 1
-
-    @classmethod
-    def async_get_supported_subentry_types(
-        cls, config_entry: config_entries.ConfigEntry
-    ) -> dict[str, type[NapoleonHomeGrillSubentryFlowHandler]]:
-        """
-        Return the sub-entry types supported by this integration.
-
-        Args:
-            config_entry: The existing hub config entry.
-
-        Returns:
-            A dict mapping ``SUBENTRY_TYPE_DEVICE`` to the grill sub-entry flow handler.
-
-        """
-        from custom_components.napoleon_home.config_flow_handler.subentry_flow import (  # noqa: PLC0415
-            NapoleonHomeGrillSubentryFlowHandler,
-        )
-
-        return {SUBENTRY_TYPE_DEVICE: NapoleonHomeGrillSubentryFlowHandler}
 
     @staticmethod
     def async_get_options_flow(
@@ -254,13 +230,12 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
         mac_lower = discovery_info.address.lower()
         for entry in self.hass.config_entries.async_entries(DOMAIN):
-            for sub in entry.subentries.values():
-                if sub.unique_id == mac_lower:
-                    LOGGER.info(
-                        "Napoleon Home: setup_stage=bluetooth_step_abort reason=already_configured address=%s",
-                        discovery_info.address,
-                    )
-                    return self.async_abort(reason="already_configured")
+            if mac_lower in entry.data.get(CONF_DEVICES, {}):
+                LOGGER.info(
+                    "Napoleon Home: setup_stage=bluetooth_step_abort reason=already_configured address=%s",
+                    discovery_info.address,
+                )
+                return self.async_abort(reason="already_configured")
 
         self._mac = discovery_info.address
         self._name = discovery_info.name or discovery_info.address
@@ -284,11 +259,20 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
             return await self.async_step_provision_guide()
 
-        LOGGER.info(
-            "Napoleon Home: setup_stage=bluetooth_step_branch branch=key_retrieval address=%s provisioned=%s",
-            discovery_info.address,
-            provisioned,
-        )
+        if provisioned is None:
+            # BLE probe was inconclusive (grill was advertising but connection failed).
+            # Route to key_retrieval as a fallback — the full auth attempt there will
+            # surface a clearer error if the grill is genuinely unreachable.
+            LOGGER.warning(
+                "Napoleon Home: setup_stage=bluetooth_step_branch branch=key_retrieval "
+                "reason=probe_inconclusive address=%s",
+                discovery_info.address,
+            )
+        else:
+            LOGGER.info(
+                "Napoleon Home: setup_stage=bluetooth_step_branch branch=key_retrieval address=%s",
+                discovery_info.address,
+            )
         return await self.async_step_key_retrieval()
 
     async def async_step_factory_reset_guide(
@@ -445,6 +429,11 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             password = user_input[CONF_PASSWORD]
             region_key = user_input[CONF_REGION]
 
+            # Store form values before the API call so the form retains them on error retry.
+            self._username = username.strip()
+            self._password = password
+            self._region_key = region_key
+
             try:
                 region = AYLA_REGIONS[region_key]
                 session = async_get_clientsession(self.hass)
@@ -480,9 +469,6 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 if not candidates:
                     errors["base"] = "no_devices_found"
                 else:
-                    self._username = username.strip()
-                    self._password = password
-                    self._region_key = region_key
                     self._access_token = access_token
                     self._refresh_token = refresh_token
                     self._token_expiry = token_expiry
@@ -539,15 +525,15 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         local_key_id: int,
     ) -> config_entries.ConfigFlowResult:
         """
-        Validate the local key via BLE and create or update the hub + sub-entry.
+        Validate the local key via BLE and create or update the hub entry.
 
         Resolves connectable MAC candidates (offset variants + discovered services),
         then authenticates with each until one accepts the key. Creates or updates
-        the hub config entry and adds the grill as a sub-entry.
+        the hub config entry and adds the grill to ``entry.data[CONF_DEVICES]``.
 
         Args:
             dsn: Ayla device serial number of the grill to configure.
-            device_name: Display name used as the sub-entry title.
+            device_name: Display name used as the device's friendly name.
             local_key: Ayla local key for BLE authentication.
             local_key_id: Ayla local key ID stored alongside the key.
 
@@ -562,8 +548,8 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """
         # DSN uniqueness check
         for entry in self.hass.config_entries.async_entries(DOMAIN):
-            for sub in entry.subentries.values():
-                if sub.data.get(CONF_DSN) == dsn:
+            for device in entry.data.get(CONF_DEVICES, {}).values():
+                if device.get(CONF_DSN) == dsn:
                     return self.async_abort(reason="already_configured")
 
         # Resolve connectable MAC candidates (offset variants + name-matched discoveries).
@@ -616,7 +602,12 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_REFRESH_TOKEN: self._refresh_token,
             CONF_TOKEN_EXPIRY: self._token_expiry,
         }
-        subentry_data = {CONF_MAC: mac, CONF_DSN: dsn, CONF_LOCAL_KEY: local_key, CONF_LOCAL_KEY_ID: local_key_id}
+        device_data = {
+            CONF_DSN: dsn,
+            CONF_LOCAL_KEY: local_key,
+            CONF_LOCAL_KEY_ID: local_key_id,
+            "name": title,
+        }
 
         # Check whether a hub entry for this account already exists.
         existing_hub = next(
@@ -625,17 +616,12 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         if existing_hub is not None:
-            if any(sub.unique_id == mac_lower for sub in existing_hub.subentries.values()):
+            if mac_lower in existing_hub.data.get(CONF_DEVICES, {}):
                 return self.async_abort(reason="already_configured")
-            self.hass.config_entries.async_update_entry(existing_hub, data={**existing_hub.data, **hub_data})
-            self.hass.config_entries.async_add_subentry(
+            updated_devices = {**existing_hub.data.get(CONF_DEVICES, {}), mac_lower: device_data}
+            self.hass.config_entries.async_update_entry(
                 existing_hub,
-                config_entries.ConfigSubentry(
-                    data=MappingProxyType(subentry_data),
-                    subentry_type=SUBENTRY_TYPE_DEVICE,
-                    title=title,
-                    unique_id=mac_lower,
-                ),
+                data={**existing_hub.data, **hub_data, CONF_DEVICES: updated_devices},
             )
             return self.async_abort(reason="device_added_to_account")
 
@@ -644,15 +630,7 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_create_entry(
             title=f"Napoleon Home ({self._username})",
-            data=hub_data,
-            subentries=[
-                {
-                    "data": subentry_data,
-                    "subentry_type": SUBENTRY_TYPE_DEVICE,
-                    "title": title,
-                    "unique_id": mac_lower,
-                }
-            ],
+            data={**hub_data, CONF_DEVICES: {mac_lower: device_data}},
         )
 
     async def _async_resolve_valid_mac(self, device_name: str) -> list[str]:
@@ -726,7 +704,7 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """
         Handle reauthentication credential entry.
 
-        Signs in once and refreshes local keys for ALL sub-entries in the hub,
+        Signs in once and refreshes local keys for ALL devices in the hub,
         then reloads the entry. Triggered by a ``s:4`` BLE rejection (rotated key)
         or a revoked Ayla refresh token.
 
@@ -745,10 +723,11 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             password = user_input[CONF_PASSWORD]
             region_key = user_input[CONF_REGION]
 
-            device_subentries = [
-                sub for sub in reauth_entry.subentries.values() if sub.subentry_type == SUBENTRY_TYPE_DEVICE
-            ]
-            dsns = [sub.data[CONF_DSN] for sub in device_subentries]
+            devices = reauth_entry.data.get(CONF_DEVICES, {})
+            # Only include devices that have a DSN — devices migrated from v1 may
+            # have an empty string if the subentry lacked the field.
+            mac_dsn_pairs = [(mac, d[CONF_DSN]) for mac, d in devices.items() if d.get(CONF_DSN)]
+            dsns = [dsn for _, dsn in mac_dsn_pairs]
 
             try:
                 region = AYLA_REGIONS[region_key]
@@ -767,12 +746,13 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 LOGGER.exception("Unexpected exception during Napoleon Home reauth")
                 errors["base"] = "unknown"
             else:
-                for subentry, (local_key, local_key_id) in zip(device_subentries, keys, strict=True):
-                    self.hass.config_entries.async_update_subentry(
-                        reauth_entry,
-                        subentry,
-                        data={**subentry.data, CONF_LOCAL_KEY: local_key, CONF_LOCAL_KEY_ID: local_key_id},
-                    )
+                updated_devices = dict(devices)
+                for (mac, _), (local_key, local_key_id) in zip(mac_dsn_pairs, keys, strict=True):
+                    updated_devices[mac] = {
+                        **updated_devices[mac],
+                        CONF_LOCAL_KEY: local_key,
+                        CONF_LOCAL_KEY_ID: local_key_id,
+                    }
                 return self.async_update_reload_and_abort(
                     reauth_entry,
                     data_updates={
@@ -781,6 +761,7 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ACCESS_TOKEN: access_token,
                         CONF_REFRESH_TOKEN: refresh_token,
                         CONF_TOKEN_EXPIRY: token_expiry,
+                        CONF_DEVICES: updated_devices,
                     },
                 )
 

@@ -22,7 +22,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the select platform."""
-    for subentry_id, coordinator in entry.runtime_data.items():
+    for coordinator in entry.runtime_data.values():
         async_add_entities(
             (
                 NapoleonHomeTempUnitSelect(
@@ -31,7 +31,6 @@ async def async_setup_entry(
                 )
                 for entity_description in TEMP_UNIT_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )
         async_add_entities(
             (
@@ -41,7 +40,6 @@ async def async_setup_entry(
                 )
                 for entity_description in BRIGHTNESS_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )
         async_add_entities(
             (
@@ -51,5 +49,4 @@ async def async_setup_entry(
                 )
                 for entity_description in GAS_UNIT_DESCRIPTIONS
             ),
-            config_subentry_id=subentry_id,
         )

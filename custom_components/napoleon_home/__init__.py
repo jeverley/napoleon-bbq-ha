@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import Platform
 from homeassistant.helpers import entity_registry as er
 import homeassistant.helpers.config_validation as cv
 
-from .const import CONF_MAC, DOMAIN, SUBENTRY_TYPE_DEVICE
+from .const import CONF_DEVICES, CONF_DSN, CONF_LOCAL_KEY, CONF_LOCAL_KEY_ID, CONF_MAC, DOMAIN
 from .coordinator import NapoleonHomeDataUpdateCoordinator
 
 if TYPE_CHECKING:
@@ -28,6 +28,8 @@ PLATFORMS: list[Platform] = [
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
+# Only used in async_migrate_entry to identify v1 device subentries
+_SUBENTRY_TYPE_DEVICE = "device"
 
 _REMOVED_ENTITY_KEYS: tuple[tuple[str, str], ...] = (
     # lcd_off switch and brightness select replaced by the backlight light entity
@@ -68,14 +70,38 @@ _REMOVED_ENTITY_KEYS: tuple[tuple[str, str], ...] = (
 def _remove_stale_entities(hass: HomeAssistant, entry: NapoleonHomeConfigEntry) -> None:
     """Remove entity registry entries that no longer exist in this version."""
     entity_reg = er.async_get(hass)
-    for subentry in entry.subentries.values():
-        if subentry.subentry_type != SUBENTRY_TYPE_DEVICE:
-            continue
-        mac = subentry.data[CONF_MAC].lower()
+    for mac in entry.data.get(CONF_DEVICES, {}):
         for platform, key in _REMOVED_ENTITY_KEYS:
             entity_id = entity_reg.async_get_entity_id(platform, DOMAIN, f"{mac}_{key}")
             if entity_id:
                 entity_reg.async_remove(entity_id)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: NapoleonHomeConfigEntry) -> bool:
+    """Migrate config entry from v1 (subentry per device) to v2 (flat devices dict)."""
+    if entry.version == 1:
+        devices: dict[str, Any] = {}
+        device_subentry_ids: list[str] = []
+        for subentry in list(entry.subentries.values()):
+            if subentry.subentry_type != _SUBENTRY_TYPE_DEVICE:
+                continue
+            mac = subentry.data[CONF_MAC].lower()
+            devices[mac] = {
+                CONF_DSN: subentry.data.get(CONF_DSN, ""),
+                CONF_LOCAL_KEY: subentry.data.get(CONF_LOCAL_KEY, ""),
+                CONF_LOCAL_KEY_ID: subentry.data.get(CONF_LOCAL_KEY_ID, 0),
+                "name": subentry.title,
+            }
+            device_subentry_ids.append(subentry.subentry_id)
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, CONF_DEVICES: devices},
+            version=2,
+            minor_version=1,
+        )
+        for subentry_id in device_subentry_ids:
+            hass.config_entries.async_remove_subentry(entry, subentry_id)
+    return True
 
 
 async def async_setup_entry(
@@ -85,9 +111,7 @@ async def async_setup_entry(
     """Set up Napoleon Home from a config entry."""
     _remove_stale_entities(hass, entry)
     coordinators: NapoleonHomeCoordinators = {
-        subentry_id: NapoleonHomeDataUpdateCoordinator(hass, entry, subentry)
-        for subentry_id, subentry in entry.subentries.items()
-        if subentry.subentry_type == SUBENTRY_TYPE_DEVICE
+        mac: NapoleonHomeDataUpdateCoordinator(hass, entry, mac) for mac in entry.data.get(CONF_DEVICES, {})
     }
     entry.runtime_data = coordinators
     await asyncio.gather(*(c.async_config_entry_first_refresh() for c in coordinators.values()))
