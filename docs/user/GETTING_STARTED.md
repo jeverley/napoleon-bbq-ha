@@ -1,191 +1,89 @@
 # Getting Started with Napoleon Home
 
-This guide will help you install and set up the Napoleon Home custom integration for Home Assistant.
+This guide walks you through installing and setting up the Napoleon Home integration for Home Assistant.
 
 ## Prerequisites
 
-- Home Assistant 2025.7.0 or newer
-- HACS (Home Assistant Community Store) installed
-- Network connectivity to [external service/device]
+- Home Assistant 2026.4.0 or later
+- [HACS](https://hacs.xyz/) installed in Home Assistant
+- A Napoleon app account with your Prestige grill registered
+- A Bluetooth adapter reachable by Home Assistant (built-in, USB, or
+  [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html)
+  with active connections enabled)
 
 ## Installation
 
 ### Via HACS (Recommended)
 
-1. Open HACS in your Home Assistant instance
-2. Go to "Integrations"
-3. Click the three dots in the top right corner
-4. Select "Custom repositories"
-5. Add this repository URL: `https://github.com/jeverley/napoleon-home-ha`
-6. Set category to "Integration"
-7. Click "Add"
-8. Find "Napoleon Home" in the integration list
-9. Click "Download"
-10. Restart Home Assistant
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jeverley&repository=napoleon-home-ha&category=integration)
+
+Click the button above, then click **Download** and restart Home Assistant.
+
+<details>
+<summary>Manual HACS steps</summary>
+
+1. Open HACS in Home Assistant
+2. Go to **Integrations**
+3. Click the three-dot menu → **Custom repositories**
+4. Add `https://github.com/jeverley/napoleon-home-ha` as an **Integration**
+5. Find **Napoleon Home** and click **Download**
+6. Restart Home Assistant
+
+</details>
 
 ### Manual Installation
 
 1. Download the latest release from the [releases page](https://github.com/jeverley/napoleon-home-ha/releases)
-2. Extract the `napoleon_home` folder from the archive
-3. Copy it to `custom_components/napoleon_home/` in your Home Assistant configuration directory
-4. Restart Home Assistant
+2. Copy the `custom_components/napoleon_home/` folder to your Home Assistant
+   `custom_components/` directory
+3. Restart Home Assistant
 
-## Initial Setup
+## Setup
 
-After installation, add the integration:
+This integration is added via **Bluetooth discovery only** — there is no manual
+"Add Integration" search path. Power on your grill and bring it within Bluetooth
+range. Home Assistant will detect it automatically and show a notification to
+begin setup.
 
-1. Go to **Settings** → **Devices & Services**
-2. Click **+ Add Integration**
-3. Search for "Napoleon Home"
-4. Follow the configuration steps:
+During setup you will be asked for:
 
-### Step 1: Connection Information
+| Field    | Description                              |
+| -------- | ---------------------------------------- |
+| Email    | Your Napoleon app email address          |
+| Password | Your Napoleon app password               |
+| Region   | The region your account is registered in |
 
-Enter the required connection details:
+Your credentials are used once to retrieve the grill's BLE local key from the
+Ayla cloud. After setup, the integration communicates directly with the grill
+over Bluetooth — no cloud dependency during normal operation.
 
-- **Host/IP Address:** The hostname or IP address of your device/service
-- **API Key/Token:** Your authentication credentials (if applicable)
-- **Port:** Connection port (default: 8080)
+If your account has multiple grills, you will be prompted to select which one to
+configure. Additional grills can be added afterwards via **Add grill** on the
+integration page.
 
-Click **Submit** to test the connection.
+## Entities
 
-### Step 2: Configuration Options
+Each configured grill exposes the following entities:
 
-Configure optional settings:
-
-- **Update Interval:** How often to poll for updates (default: 5 minutes)
-- **Name:** Friendly name for this integration instance
-
-Click **Submit** to complete setup.
-
-## What Gets Created
-
-After successful setup, the integration creates:
-
-### Devices
-
-- **Device Name:** Main device representing your connected service/hardware
-  - Model information
-  - Software version
-  - Configuration URL (link to device web interface)
-
-### Entities
-
-The following entities are automatically created:
-
-#### Sensors
-
-- `sensor.<device_name>_<sensor_name>` - Descriptive sensor measurements
-- More sensors as applicable to your setup
-
-#### Binary Sensors
-
-- `binary_sensor.<device_name>_<sensor_name>` - On/off status indicators
-
-#### Switches
-
-- `switch.<device_name>_<switch_name>` - Controllable on/off switches
-
-#### Other Platforms
-
-Additional entities may be created depending on your device capabilities.
-
-## First Steps
-
-### Dashboard Cards
-
-Add entities to your dashboard:
-
-1. Go to your dashboard
-2. Click **Edit Dashboard** → **Add Card**
-3. Choose card type (e.g., "Entities", "Glance")
-4. Select entities from "Napoleon Home"
-
-Example entities card:
-
-```yaml
-type: entities
-title: Napoleon Home
-entities:
-  - sensor.device_name_sensor
-  - binary_sensor.device_name_connectivity
-  - switch.device_name_switch
-```
-
-### Automations
-
-Use the integration in automations:
-
-**Example - Trigger on sensor change:**
-
-```yaml
-automation:
-  - alias: "React to sensor value"
-    trigger:
-      - trigger: state
-        entity_id: sensor.device_name_sensor
-    action:
-      - action: notify.notify
-        data:
-          message: "Sensor changed to {{ trigger.to_state.state }}"
-```
-
-**Example - Control switch based on time:**
-
-```yaml
-automation:
-  - alias: "Turn on in morning"
-    trigger:
-      - trigger: time
-        at: "07:00:00"
-    action:
-      - action: switch.turn_on
-        target:
-          entity_id: switch.device_name_switch
-```
-
-## Troubleshooting
-
-### Connection Failed
-
-If setup fails with connection errors:
-
-1. Verify the host/IP address is correct and reachable
-2. Check that the API key/token is valid
-3. Ensure no firewall is blocking the connection
-4. Check Home Assistant logs for detailed error messages
-
-### Entities Not Updating
-
-If entities show "Unavailable" or don't update:
-
-1. Check that the device/service is online
-2. Verify API credentials haven't expired
-3. Review logs: **Settings** → **System** → **Logs**
-4. Try reloading the integration
-
-### Debug Logging
-
-Enable debug logging to troubleshoot issues:
-
-```yaml
-logger:
-  default: warning
-  logs:
-    custom_components.napoleon_home: debug
-```
-
-Add this to `configuration.yaml`, restart, and reproduce the issue. Check logs for detailed information.
+| Platform        | Entity                   | Description                              |
+| --------------- | ------------------------ | ---------------------------------------- |
+| `binary_sensor` | Status                   | Whether the grill is reachable over BLE  |
+| `binary_sensor` | Battery saver mode       | Display battery saver mode (diagnostic)  |
+| `sensor`        | Probe 1–3 + Grill        | Live temperature readings                |
+| `sensor`        | Battery                  | Controller battery level                 |
+| `sensor`        | Gas tank weight          | Remaining gas (kg or lbs)                |
+| `sensor`        | Firmware                 | Grill firmware version (diagnostic)      |
+| `number`        | Automatic shutoff        | Grill automatic shutoff timeout (1–24 h) |
+| `number`        | Probe 1–3 + Grill target | Alert threshold per temperature channel  |
+| `number`        | Empty / Full tank weight | Gas calibration weights                  |
+| `light`         | Knob lights              | Illuminated knob rings on/off            |
+| `select`        | Temperature unit         | Celsius or Fahrenheit                    |
+| `select`        | Tank unit                | Kilograms or Pounds                      |
+| `select`        | Display brightness       | Low, Medium, or High                     |
+| `button`        | Power off                | Remotely power off the grill             |
 
 ## Next Steps
 
-- See [CONFIGURATION.md](./CONFIGURATION.md) for detailed configuration options
-- See [EXAMPLES.md](./EXAMPLES.md) for more automation examples
+- See [CONFIGURATION.md](./CONFIGURATION.md) for available options after setup
+- See [EXAMPLES.md](./EXAMPLES.md) for automation and dashboard examples
 - Report issues at [GitHub Issues](https://github.com/jeverley/napoleon-home-ha/issues)
-
-## Support
-
-For help and discussion:
-
-- [GitHub Discussions](https://github.com/jeverley/napoleon-home-ha/discussions)
-- [Home Assistant Community Forum](https://community.home-assistant.io/)

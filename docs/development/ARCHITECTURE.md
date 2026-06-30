@@ -414,6 +414,6 @@ Core dependencies (see `manifest.json`):
 - `bleak` — Async BLE client library
 - `bleak-retry-connector` — Robust BLE connection management with auto-retry
 - `aiohttp` — Async HTTP client (Ayla cloud API, setup time only)
-- Home Assistant 2025.7.0+ — Platform requirements
+- Home Assistant 2026.4.0+ — Platform requirements
 
 Development dependencies (see `requirements_dev.txt`, `requirements_test.txt`).
