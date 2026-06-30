@@ -6,7 +6,7 @@ This document describes the technical architecture of the Napoleon Home custom c
 
 ```text
 custom_components/napoleon_home/
-├── __init__.py                   # Integration setup and unload; hub/subentry coordinator loop
+├── __init__.py                   # Integration setup and unload; iterates CONF_DEVICES to create coordinators
 ├── config_flow.py                # Thin re-export required by hassfest
 ├── const.py                      # Constants, GATT UUIDs, Ayla credentials, timing constants
 ├── data.py                       # Type aliases and NapoleonHomeGrillState dataclass
@@ -33,8 +33,7 @@ custom_components/napoleon_home/
 ├── config_flow_handler/          # Config and options flows
 │   ├── __init__.py               # Re-exports all flow handler classes
 │   ├── config_flow.py            # Main flow: BLE discovery, user setup, reauth
-│   ├── options_flow.py           # Options flow: poll interval
-│   ├── subentry_flow.py          # Subentry flow: add grill to existing account hub
+│   ├── options_flow.py           # Options flow: poll interval, add/remove grill
 │   └── schemas/
 │       ├── __init__.py
 │       └── options.py            # Options flow Voluptuous schema
@@ -45,7 +44,7 @@ custom_components/napoleon_home/
 │
 ├── entity_utils/                 # Shared entity helpers
 │   ├── __init__.py
-│   └── device_info.py            # DeviceInfo builder for sub-entry devices
+│   └── device_info.py            # DeviceInfo builder for grill devices
 │
 ├── binary_sensor/
 │   ├── __init__.py
@@ -79,22 +78,23 @@ custom_components/napoleon_home/
 │   └── tank_weight.py            # Tank weight sensor (TNK_WT)
 ```
 
-## Hub and Sub-entry Architecture
+## Multi-Grill Architecture
 
-> **Napoleon Home:** This integration uses a hub/sub-entry model rather than the single-coordinator
-> pattern described in the blueprint template.
+> **Napoleon Home:** This integration uses a single config entry per account with a flat devices
+> dict, rather than the single-coordinator pattern described in the blueprint template.
 
-- **One config entry per Napoleon account** (the hub). Hub data: `{CONF_REGION, CONF_USERNAME}`.
-- **One `ConfigSubentry` per grill**. Sub-entry data: `{CONF_MAC, CONF_DSN, CONF_LOCAL_KEY}`.
+- **One config entry per Napoleon account**. Entry data: `{CONF_REGION, CONF_USERNAME, CONF_DEVICES, …}`.
+- **`CONF_DEVICES`**: `dict[str, Any]` keyed by `mac.lower()`. Each value holds `{CONF_DSN, CONF_LOCAL_KEY, CONF_LOCAL_KEY_ID, "name"}` for one grill.
 
 ```text
-ConfigEntry (hub — one per account)
-├── ConfigSubentry (grill 1)  ← CONF_MAC, CONF_DSN, CONF_LOCAL_KEY
-├── ConfigSubentry (grill 2)
-└── ...
+ConfigEntry (one per account)
+└── entry.data[CONF_DEVICES]
+    ├── "aa:bb:cc:dd:ee:01"  ← {CONF_DSN, CONF_LOCAL_KEY, CONF_LOCAL_KEY_ID, "name"}
+    ├── "aa:bb:cc:dd:ee:02"
+    └── ...
 ```
 
-`entry.runtime_data` is `dict[str, NapoleonHomeDataUpdateCoordinator]` keyed by `subentry_id`.
+`entry.runtime_data` is `dict[str, NapoleonHomeDataUpdateCoordinator]` keyed by `mac.lower()`.
 
 Type aliases (in `data.py`):
 
@@ -173,23 +173,22 @@ Handles all communication with the Ayla cloud API. Implements:
 
 **Directory:** `config_flow_handler/`
 
-> **Napoleon Home:** Uses a hub/sub-entry model. Three flows are implemented rather than the single
-> user+reauth pattern in the blueprint template.
+> **Napoleon Home:** Two flows are implemented — main config flow and options flow — rather than the
+> single user+reauth pattern in the blueprint template.
 
 Implements the configuration UI for adding and configuring the integration.
 
 **Structure:**
 
-- `config_flow.py`: Main flow — BLE-first discovery, reauth; creates the hub entry
-- `options_flow.py`: Options flow for poll interval configuration
+- `config_flow.py`: Main flow — BLE-first discovery, reauth; creates the config entry and writes the first device into `CONF_DEVICES`
+- `options_flow.py`: Options flow — poll interval, add grill, remove grill
 - `schemas/`: Voluptuous schemas for options forms
-- `subentry_flow.py`: Sub-entry flow — adds a grill to an existing account hub
 
-| Flow       | Handler                                 | Purpose                                  |
-| ---------- | --------------------------------------- | ---------------------------------------- |
-| Main setup | `NapoleonHomeConfigFlowHandler`         | Create hub entry + first grill sub-entry |
-| Subentry   | `NapoleonHomeGrillSubentryFlowHandler`  | Add another grill to an existing hub     |
-| Reauth     | Step in `NapoleonHomeConfigFlowHandler` | Refresh `local_key` for all sub-entries  |
+| Flow       | Handler                                 | Purpose                                            |
+| ---------- | --------------------------------------- | -------------------------------------------------- |
+| Main setup | `NapoleonHomeConfigFlowHandler`         | Create entry + write first device to CONF_DEVICES  |
+| Options    | `NapoleonHomeOptionsFlow`               | Poll interval; add/remove grills from CONF_DEVICES |
+| Reauth     | Step in `NapoleonHomeConfigFlowHandler` | Refresh `local_key` for all devices                |
 
 Setup is **BLE-discovery only** (`async_step_user` aborts with `discovery_required`). The flow
 probes provisioning state (`_async_probe_ble`) immediately on advertisement and routes through
@@ -202,7 +201,6 @@ authentication, so the grill itself decides the match rather than a MAC heuristi
 **Key classes:**
 
 - `NapoleonHomeConfigFlowHandler` (main flow, in `config_flow_handler/config_flow.py`)
-- `NapoleonHomeGrillSubentryFlowHandler` (sub-entry flow, in `config_flow_handler/subentry_flow.py`)
 - `NapoleonHomeOptionsFlow` (options, in `config_flow_handler/options_flow.py`)
 
 ### Base Entity
@@ -319,7 +317,7 @@ conventions.
 > [!NOTE]
 > The `blueprint.*` instruction files use generic placeholders and are synced from the upstream
 > template. Napoleon Home-specific patterns that diverge from the generic blueprint (BLE instead of
-> HTTP, hub/subentry instead of single coordinator) are documented in `AGENTS.md`.
+> HTTP, flat CONF_DEVICES dict instead of single coordinator) are documented in `AGENTS.md`.
 
 > [!NOTE]
 > Entity platform files include: `alarm_control_panel/**/*.py`, `binary_sensor/**/*.py`,
@@ -375,7 +373,7 @@ See [DECISIONS.md](./DECISIONS.md) for architectural and design decisions made d
 ### Adding a New Platform
 
 1. Create directory: `custom_components/napoleon_home/<platform>/`
-2. Implement `__init__.py` with `async_setup_entry()` — iterate `entry.runtime_data.items()` and call `async_add_entities(..., config_subentry_id=subentry_id)` for each coordinator
+2. Implement `__init__.py` with `async_setup_entry()` — iterate `entry.runtime_data.items()` and call `async_add_entities(...)` for each coordinator
 3. Create entity classes inheriting from platform base + `NapoleonHomeEntity`
 4. Add platform to `PLATFORMS` in `const.py`
 
