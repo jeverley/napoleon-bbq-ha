@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from homeassistant.components.bluetooth import async_rediscover_address
 from homeassistant.const import Platform
 import homeassistant.helpers.config_validation as cv
 
@@ -77,6 +78,7 @@ async def async_remove_config_entry_device(
         entry,
         data={**entry.data, CONF_DEVICES: {m: d for m, d in devices.items() if m != mac}},
     )
+    async_rediscover_address(hass, mac)
     return True
 
 

@@ -3,7 +3,7 @@
   "name": "Napoleon Home",
   "bluetooth": [
     {
-      "local_name": "Prestige-*"
+      "service_uuid": "0000fe28-0000-1000-8000-00805f9b34fb"
     }
   ],
   "codeowners": [

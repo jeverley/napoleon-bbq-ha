@@ -40,9 +40,9 @@ https://developers.home-assistant.io/docs/config_entries_config_flow_handler
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
-from bleak.exc import BleakError
 import voluptuous as vol
 
 from custom_components.napoleon_home.api import (
@@ -70,6 +70,7 @@ from custom_components.napoleon_home.const import (
     CONF_TOKEN_EXPIRY,
     DOMAIN,
     LOGGER,
+    NAPOLEON_NAME_PREFIXES,
 )
 from homeassistant import config_entries
 from homeassistant.components.bluetooth import (
@@ -92,6 +93,7 @@ from homeassistant.helpers.selector import (
 
 if TYPE_CHECKING:
     from custom_components.napoleon_home.config_flow_handler.options_flow import NapoleonHomeOptionsFlow
+
 
 _REGION_OPTIONS = [
     SelectOptionDict(value=AYLA_REGION_EU, label="Europe"),
@@ -118,6 +120,10 @@ _CREDENTIALS_SCHEMA = vol.Schema(
 
 class NapoleonHomeMacAddressRequiredError(HomeAssistantError):
     """Raised when the flow cannot resolve a grill BLE MAC address."""
+
+
+class NapoleonHomeBLEConnectionError(HomeAssistantError):
+    """Raised when BLE authentication fails due to a connection error (e.g. timeout)."""
 
 
 def _mac_variant_candidates(mac: str) -> list[str]:
@@ -196,6 +202,8 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._mac: str | None = None
         self._name: str | None = None
         self._ble_dsn: str | None = None
+        self._ble_display_name: str | None = None
+        self._ble_model: str | None = None
         self._username: str = ""
         self._password: str = ""
         self._region_key: str = ""
@@ -236,43 +244,71 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 return self.async_abort(reason="already_configured")
 
+        # Napoleon grills advertise a local name starting with a known prefix.
+        # If a local name is present but doesn't match any known prefix, this is a
+        # non-Napoleon Ayla device sharing the FE28 service UUID — fast reject.
+        # HA sets discovery_info.name to the address when no local name is present,
+        # so treat name == address as "no local name".
+        local_name = discovery_info.name if discovery_info.name != discovery_info.address else None
+        if local_name and not local_name.startswith(NAPOLEON_NAME_PREFIXES):
+            LOGGER.debug(
+                "Napoleon Home: setup_stage=bluetooth_step_abort reason=not_napoleon address=%s name=%s",
+                discovery_info.address,
+                local_name,
+            )
+            return self.async_abort(reason="not_supported")
+
+        await self.async_set_unique_id(discovery_info.address.upper())
+
         self._mac = discovery_info.address
-        self._name = discovery_info.name or discovery_info.address
+        # Use the advertisement name if present; otherwise fall back to the address.
+        self._name = local_name or self._name or discovery_info.address
         self.context["title_placeholders"] = {"name": self._name}
 
-        # BLE probe: pair + check_provisioned — determines setup path.
-        # DSN is read from the open GATT characteristic during the same connection.
+        # If the grill hasn't advertised a name and we haven't read one yet (or a
+        # previous read failed), do a quick read-only BLE connect to get DSN and
+        # display name before showing the confirmation form.
+        if not local_name and not self._ble_display_name:
+            await self._async_read_ble_metadata(self._mac)
+            if self._ble_model and not self._ble_model.startswith(NAPOLEON_NAME_PREFIXES):
+                return self.async_abort(reason="not_supported")
+            if self._ble_display_name:
+                self._name = self._ble_display_name
+                self.context["title_placeholders"] = {"name": self._name}
+
+        return await self.async_step_bluetooth_confirm()
+
+    async def async_step_bluetooth_confirm(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Show confirmation form; on submit probe and route to the correct setup step."""
+        if user_input is not None:
+            return await self._async_probe_and_route()
+        return self.async_show_form(
+            step_id="bluetooth_confirm",
+            data_schema=vol.Schema({}),
+            description_placeholders={"name": self._name or self._mac or ""},
+        )
+
+    async def _async_read_ble_metadata(self, mac: str) -> None:
+        """Best-effort read of model name (0x2A00) from open GATT characteristics.
+
+        Connects without pairing or subscribing. All failures are suppressed —
+        callers fall back to the MAC address as the device name.
+
+        """
+        ble_device = async_ble_device_from_address(self.hass, mac, connectable=True)
+        if ble_device is None:
+            return
         try:
-            provisioned = await self._async_probe_ble(discovery_info.address)
-        except NapoleonHomeAlreadyBondedError:
-            LOGGER.info(
-                "Napoleon Home: setup_stage=bluetooth_step_branch branch=factory_reset address=%s",
-                discovery_info.address,
-            )
-            return await self.async_step_factory_reset_guide()
-
-        if provisioned is False:
-            LOGGER.info(
-                "Napoleon Home: setup_stage=bluetooth_step_branch branch=provision_guide address=%s",
-                discovery_info.address,
-            )
-            return await self.async_step_provision_guide()
-
-        if provisioned is None:
-            # BLE probe was inconclusive (grill was advertising but connection failed).
-            # Route to key_retrieval as a fallback — the full auth attempt there will
-            # surface a clearer error if the grill is genuinely unreachable.
-            LOGGER.warning(
-                "Napoleon Home: setup_stage=bluetooth_step_branch branch=key_retrieval "
-                "reason=probe_inconclusive address=%s",
-                discovery_info.address,
-            )
-        else:
-            LOGGER.info(
-                "Napoleon Home: setup_stage=bluetooth_step_branch branch=key_retrieval address=%s",
-                discovery_info.address,
-            )
-        return await self.async_step_key_retrieval()
+            async with NapoleonHomeBLESession(mac) as session:
+                await session.read_open_characteristics(ble_device)
+                self._ble_model = session.model
+                if not self._ble_display_name:
+                    self._ble_display_name = session.display_name or session.model
+        except Exception:  # noqa: BLE001
+            LOGGER.debug("Napoleon Home %s: metadata read failed (best-effort)", mac)
 
     async def async_step_factory_reset_guide(
         self,
@@ -363,6 +399,63 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"name": self._name or self._mac or ""},
         )
 
+    @contextlib.asynccontextmanager
+    async def _handle_api_errors(self, errors: dict[str, str]):  # type: ignore[return]
+        """Async context manager that maps Napoleon API exceptions to form error keys."""
+        try:
+            yield
+        except NapoleonHomeApiClientAuthenticationError:
+            errors["base"] = "invalid_auth"
+        except NapoleonHomeApiClientCommunicationError:
+            errors["base"] = "cannot_connect"
+        except NapoleonHomeApiClientError:
+            errors["base"] = "unknown"
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Unexpected exception during Napoleon Home API call")
+            errors["base"] = "unknown"
+
+    async def _async_probe_and_route(self) -> config_entries.ConfigFlowResult:
+        """Probe the grill's provisioning state and route to the appropriate next step.
+
+        Used by ``async_step_bluetooth`` after the initial advertisement check.
+        Calls ``_async_probe_ble``, applies the display name from GATT if retrieved,
+        then routes: factory_reset_guide on ATT 0x05, provision_guide on s:6,
+        key_retrieval on provisioned or inconclusive.
+
+        """
+        try:
+            provisioned = await self._async_probe_ble(self._mac or "")
+        except NapoleonHomeAlreadyBondedError:
+            LOGGER.info(
+                "Napoleon Home: setup_stage=bluetooth_step_branch branch=factory_reset address=%s",
+                self._mac,
+            )
+            if self._ble_display_name:
+                self._name = self._ble_display_name
+                self.context["title_placeholders"] = {"name": self._name}
+            return await self.async_step_factory_reset_guide()
+        if self._ble_display_name:
+            self._name = self._ble_display_name
+            self.context["title_placeholders"] = {"name": self._name}
+        if provisioned is False:
+            LOGGER.info(
+                "Napoleon Home: setup_stage=bluetooth_step_branch branch=provision_guide address=%s",
+                self._mac,
+            )
+            return await self.async_step_provision_guide()
+        if provisioned is None:
+            LOGGER.warning(
+                "Napoleon Home: setup_stage=bluetooth_step_branch branch=key_retrieval "
+                "reason=probe_inconclusive address=%s",
+                self._mac,
+            )
+        else:
+            LOGGER.info(
+                "Napoleon Home: setup_stage=bluetooth_step_branch branch=key_retrieval address=%s",
+                self._mac,
+            )
+        return await self.async_step_key_retrieval()
+
     async def _async_probe_ble(self, mac: str) -> bool | None:
         """Connect, bond, and probe provisioning state.
 
@@ -370,7 +463,9 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         (grill not discoverable or probe inconclusive).
 
         On first call (``self._ble_dsn is None``) also reads the DSN from the open
-        GATT DUID characteristic during the same connection.
+        GATT DUID characteristic during the same connection. When no advertisement
+        local name was present (provisioned grill), also reads the display name from
+        the GATT characteristic until a non-empty value is returned.
 
         Raises:
             NapoleonHomeAlreadyBondedError: Grill refuses writes with ATT 0x05.
@@ -381,13 +476,34 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             return None
         try:
             async with NapoleonHomeBLESession(mac) as session:
-                await session.connect(ble_device)
+                # Catch AlreadyBondedError so we can still harvest session.model (0x2A00),
+                # which connect() reads before pair(). DSN and display_name are read after
+                # pair() and are unavailable in the bonded case.
+                bonded_err: NapoleonHomeAlreadyBondedError | None = None
+                try:
+                    await session.connect(ble_device)
+                except NapoleonHomeAlreadyBondedError as err:
+                    bonded_err = err
+
                 if self._ble_dsn is None:
-                    try:
-                        self._ble_dsn = await session.read_dsn()
-                    except BleakError:
-                        LOGGER.debug("Napoleon Home %s: DSN read failed — will match by MAC", mac)
-                return await session.check_provisioned()
+                    self._ble_dsn = session.dsn
+                    if self._ble_dsn is None:
+                        LOGGER.debug("Napoleon Home %s: DSN unavailable — will match by MAC", mac)
+                if session.display_name:
+                    self._ble_display_name = session.display_name
+                elif not self._ble_display_name and session.model:
+                    self._ble_display_name = session.model
+
+                if bonded_err is not None:
+                    raise bonded_err  # noqa: TRY301
+
+                provisioned = await session.check_provisioned()
+                LOGGER.debug(
+                    "Napoleon Home %s: check_provisioned=%s",
+                    mac,
+                    provisioned,
+                )
+                return provisioned
         except NapoleonHomeAlreadyBondedError:
             raise
         except Exception:  # noqa: BLE001
@@ -433,21 +549,12 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self._password = password
             self._region_key = region_key
 
-            try:
+            async with self._handle_api_errors(errors):
                 region = AYLA_REGIONS[region_key]
                 session = async_get_clientsession(self.hass)
                 client = NapoleonHomeApiClient(region, session)
                 devices, access_token, refresh_token, token_expiry = await client.async_list_devices(username, password)
-            except NapoleonHomeApiClientAuthenticationError:
-                errors["base"] = "invalid_auth"
-            except NapoleonHomeApiClientCommunicationError:
-                errors["base"] = "cannot_connect"
-            except NapoleonHomeApiClientError:
-                errors["base"] = "unknown"
-            except Exception:  # noqa: BLE001
-                LOGGER.exception("Unexpected exception during Napoleon Home key retrieval")
-                errors["base"] = "unknown"
-            else:
+            if "base" not in errors:
                 # Match device: prefer DSN from GATT read. If unknown or stale,
                 # try every account device and let real BLE auth decide — more
                 # robust than guessing a MAC offset.
@@ -475,6 +582,11 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     result: config_entries.ConfigFlowResult | None = None
                     key_rejected = False
                     for dsn, device_name, _ in candidates:
+                        LOGGER.debug(
+                            "Napoleon Home: key_retrieval attempting dsn=%s name=%s",
+                            dsn,
+                            device_name,
+                        )
                         try:
                             local_key, local_key_id = await client.async_fetch_key(access_token, dsn)
                             result = await self._async_finish(dsn, device_name, local_key, local_key_id)
@@ -486,6 +598,9 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                             continue
                         except NapoleonHomeMacAddressRequiredError:
                             errors["base"] = "ble_discovery_required"
+                            break
+                        except NapoleonHomeBLEConnectionError:
+                            errors["base"] = "ble_auth_failed"
                             break
                         except HomeAssistantError:
                             errors["base"] = "cannot_connect"
@@ -557,6 +672,7 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # Full BLE authentication — try each candidate until one accepts the key.
         mac: str | None = None
         last_auth_err: ConfigEntryAuthFailed | None = None
+        had_ble_failure = False
         for candidate in mac_candidates:
             ble_device = async_ble_device_from_address(self.hass, candidate, connectable=True)
             if ble_device is None:
@@ -569,6 +685,10 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 mac = candidate
                 break
             except NapoleonHomeAlreadyBondedError:
+                LOGGER.warning(
+                    "Napoleon Home %s: grill already bonded to another device — routing to factory reset guide",
+                    candidate,
+                )
                 return await self.async_step_factory_reset_guide()
             except NapoleonHomeNotProvisionedError:
                 raise
@@ -577,8 +697,12 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 last_auth_err = err
             except Exception as err:  # noqa: BLE001
                 LOGGER.debug("Napoleon Home %s: BLE auth error — skipping candidate: %s", candidate, err)
+                had_ble_failure = True
 
         if mac is None:
+            if had_ble_failure:
+                msg = f"Napoleon Home {mac_candidates[0]}: BLE connection failed during authentication"
+                raise NapoleonHomeBLEConnectionError(msg)
             if last_auth_err is not None:
                 raise last_auth_err
             msg = f"Napoleon Home {mac_candidates[0]}: grill not discoverable for authentication"
@@ -667,7 +791,7 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             if target_name and folded == target_name:
                 _add_candidate(address)
                 continue
-            if "napoleon" in folded or "prestige" in folded:
+            if name.startswith(NAPOLEON_NAME_PREFIXES):
                 prestige_like.append(address)
 
         for mac in prestige_like:
@@ -727,23 +851,14 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             mac_dsn_pairs = [(mac, d[CONF_DSN]) for mac, d in devices.items() if d.get(CONF_DSN)]
             dsns = [dsn for _, dsn in mac_dsn_pairs]
 
-            try:
+            async with self._handle_api_errors(errors):
                 region = AYLA_REGIONS[region_key]
                 session = async_get_clientsession(self.hass)
                 client = NapoleonHomeApiClient(region, session)
                 keys, access_token, refresh_token, token_expiry = await client.async_refresh_local_keys(
                     username, password, dsns
                 )
-            except NapoleonHomeApiClientAuthenticationError:
-                errors["base"] = "invalid_auth"
-            except NapoleonHomeApiClientCommunicationError:
-                errors["base"] = "cannot_connect"
-            except NapoleonHomeApiClientError:
-                errors["base"] = "unknown"
-            except Exception:  # noqa: BLE001
-                LOGGER.exception("Unexpected exception during Napoleon Home reauth")
-                errors["base"] = "unknown"
-            else:
+            if "base" not in errors:
                 updated_devices = dict(devices)
                 for (mac, _), (local_key, local_key_id) in zip(mac_dsn_pairs, keys, strict=True):
                     updated_devices[mac] = {
