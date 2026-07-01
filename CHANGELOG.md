@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/jeverley/napoleon-home-ha/compare/v1.1.0...v1.2.0) (2026-07-01)
+
+
+### Features
+
+* **napoleon_home:** defer BLE probe to user confirmation and refactor discovery flow ([d5719ac](https://github.com/jeverley/napoleon-home-ha/commit/d5719ace9aba80751bea7702f2b844c2b470bbbb))
+
 ## [1.1.0](https://github.com/jeverley/napoleon-home-ha/compare/v1.0.0...v1.1.0) (2026-06-30)
 
 
