@@ -19,7 +19,13 @@ PARALLEL_UPDATES = 1
 # BLE characteristic UUIDs
 INBOX_UUID = "01000001-fe28-435b-991a-f1b21bb9bcd0"
 OUTBOX_UUID = "01000002-fe28-435b-991a-f1b21bb9bcd0"
-DSN_UUID = "00000001-fe28-435b-991a-f1b21bb9bcd0"  # Ayla config service — readable without bond
+DSN_UUID = "00000001-fe28-435b-991a-f1b21bb9bcd0"  # Ayla config service — requires encryption (bond first)
+DISPLAY_NAME_UUID = (
+    "00000006-fe28-435b-991a-f1b21bb9bcd0"  # User-configurable alias (read/write via app) — may be empty
+)
+GATT_DEVICE_NAME_UUID = (
+    "00002a00-0000-1000-8000-00805f9b34fb"  # Generic Access Device Name (0x2A00) — model string, e.g. "Prestige-1F2"
+)
 
 # Auth
 AUTH_USER = "android.user@email.com"
@@ -93,6 +99,28 @@ POLL_PROPS: list[str] = [
 
 # Probe temperature sentinel — value returned when probe is not connected
 PROBE_DISCONNECTED = 4095.0
+
+# Napoleon/Ayla BLE device name prefixes from AppConstants.java.
+# Unprovisioned grills advertise with a local name starting with one of these.
+# Any FE28 advertisement WITH a local name that doesn't match is a non-Napoleon
+# Ayla device sharing the service UUID.
+NAPOLEON_NAME_PREFIXES: tuple[str, ...] = (
+    "Prestige",
+    "ProVX",
+    "Pro",
+    "AWS",
+    "R365EQ",
+    "Elevation",
+    "Stylus",
+    "Astound",
+    "Luminex",
+    "Rosedale",
+    "Thermostat",
+    "ACCU-PROBE",
+    "ACCU-PRO",
+    "MeatStick",
+    "S25",
+)
 
 # Ayla cloud region identifiers
 AYLA_REGION_EU = "eu"

@@ -1,6 +1,11 @@
 {
   "config": {
     "step": {
+      "bluetooth_confirm": {
+        "title": "Add {name}",
+        "description": "**{name}** was found nearby. Tap **Submit** to begin setup.",
+        "submit": "Submit"
+      },
       "key_retrieval": {
         "title": "Connect to Napoleon Home",
         "description": "Enter your Napoleon app account credentials to retrieve the local key for **{name}**.",
@@ -38,13 +43,15 @@
       "ble_not_provisioned": "Grill is not provisioned — please complete setup in the Napoleon app first.",
       "ble_discovery_required": "Couldn't determine the grill Bluetooth address. Start setup from Bluetooth discovery by powering on the grill and adding it when detected.",
       "ble_key_rejected": "BLE key rejected by grill — the local key may have rotated. Try reauthenticating.",
+      "ble_auth_failed": "Failed to connect to the grill via Bluetooth. Ensure the grill is powered on and within range.",
       "reset_not_detected": "Grill is still bonded to another device. Confirm the factory reset completed (hold ignition ~10 s until the grill beeps) then try again.",
       "unknown": "Unexpected error. Check the Home Assistant logs for details."
     },
     "abort": {
       "already_configured": "This Napoleon Home grill is already configured.",
       "device_added_to_account": "The Napoleon Home grill has been added to your existing account.",
-      "discovery_required": "This integration can only be added via Bluetooth discovery. Power on your grill and it will appear automatically."
+      "discovery_required": "This integration can only be added via Bluetooth discovery. Power on your grill and it will appear automatically.",
+      "not_supported": "This device is not a Napoleon grill."
     }
   },
   "options": {

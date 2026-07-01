@@ -36,8 +36,10 @@ from custom_components.napoleon_home.const import (
     AUTH_USER,
     BLE_AUTH_STATUS_NOT_PROVISIONED,
     BLE_AUTH_STATUS_REJECTED,
+    DISPLAY_NAME_UUID,
     DOMAIN,
     DSN_UUID,
+    GATT_DEVICE_NAME_UUID,
     INBOX_UUID,
     LOGGER,
     OUTBOX_UUID,
@@ -57,18 +59,16 @@ _BLUEZ_PAIRING_REJECTED = frozenset(
 )
 
 
+def _is_pairing_rejected(err: Exception) -> bool:
+    return isinstance(err, BleakDBusError) and err.dbus_error in _BLUEZ_PAIRING_REJECTED
+
+
 def _is_att_insufficient_auth(err: Exception) -> bool:
-    """Return True if the exception is a BlueZ ATT Insufficient Authentication error (0x05)."""
     return (
         isinstance(err, BleakDBusError)
         and err.dbus_error == "org.bluez.Error.Failed"
         and (err.dbus_error_details or "").startswith("ATT error: 0x05")
     )
-
-
-def _is_pairing_rejected(err: Exception) -> bool:
-    """Return True if BlueZ rejected pairing (grill bonded to another device)."""
-    return isinstance(err, BleakDBusError) and err.dbus_error in _BLUEZ_PAIRING_REJECTED
 
 
 class NapoleonHomeBLESession:
@@ -111,6 +111,9 @@ class NapoleonHomeBLESession:
         self._write_lock: asyncio.Lock = asyncio.Lock()
         self._seq: int = 0
         self._handlers: dict[str, list[Callable[[dict[str, Any]], None]]] = {}
+        self._dsn: str | None = None
+        self._display_name: str | None = None
+        self._model: str | None = None
 
     # ── Public properties ────────────────────────────────────────────────────
 
@@ -123,6 +126,21 @@ class NapoleonHomeBLESession:
     def mtu(self) -> int:
         """Return the negotiated MTU size for this connection."""
         return self._mtu
+
+    @property
+    def dsn(self) -> str | None:
+        """DSN read from the open GATT characteristic during connect(), or None."""
+        return self._dsn
+
+    @property
+    def display_name(self) -> str | None:
+        """User-configurable alias from DISPLAY_NAME_UUID, or None."""
+        return self._display_name
+
+    @property
+    def model(self) -> str | None:
+        """Device model string from Generic Access Device Name (0x2A00), or None."""
+        return self._model
 
     # ── Notification dispatch ────────────────────────────────────────────────
 
@@ -191,28 +209,39 @@ class NapoleonHomeBLESession:
             ble_device_callback=ble_device_callback,
         )
 
-        LOGGER.debug("Napoleon Home %s: BLE connected, subscribing to outbox", self._mac)
+        LOGGER.debug("Napoleon Home %s: BLE connected, reading open characteristics", self._mac)
 
-        # Bond before any INBOX write — INBOX (01000001-fe28) requires an
-        # encrypted, bonded link.  On first run this triggers Just Works SMP.
-        # On subsequent runs BlueZ uses the stored LTK; pair() returns immediately.
+        # 0x2A00 (Generic Access Device Name) is readable without a bond — gives the
+        # model string (e.g. "Prestige-1F2"). DSN and display name require encryption
+        # so they are read after pair() below.
+        self._model = await self._read_gatt_char_string(GATT_DEVICE_NAME_UUID, "model (0x2A00)")
+
+        # Bond before any INBOX write — INBOX (01000001-fe28) requires an encrypted,
+        # bonded link. On first run this triggers Just Works SMP; on subsequent runs
+        # BlueZ uses the stored LTK and pair() returns immediately.
         try:
             await self._client.pair()
             LOGGER.debug("Napoleon Home %s: BLE link bonded/encrypted", self._mac)
         except Exception as err:
             if _is_pairing_rejected(err):
+                LOGGER.debug(
+                    "Napoleon Home %s: pair() rejected — grill bonded to another device: %s",
+                    self._mac,
+                    err,
+                )
                 raise NapoleonHomeAlreadyBondedError(
                     f"Napoleon Home {self._mac}: grill rejected pairing (bonded to another device)"
                 ) from err
             LOGGER.debug("Napoleon Home %s: pair() raised — proceeding (already bonded?)", self._mac)
 
+        # DSN and display name require an encrypted link — read after pair().
+        self._dsn = await self._read_gatt_char_string(DSN_UUID, "DSN")
+        self._display_name = await self._read_gatt_char_string(DISPLAY_NAME_UUID, "display name")
+
         try:
             await self._client.start_notify(OUTBOX_UUID, self._on_bleak_notification)
         except Exception as err:
-            if _is_att_insufficient_auth(err):
-                raise NapoleonHomeAlreadyBondedError(
-                    f"Napoleon Home {self._mac}: grill refuses bond (ATT 0x05)"
-                ) from err
+            self._raise_if_bonded(err)
             raise
 
         # Negotiate a large MTU so the full Oac payload fits in one write.
@@ -222,6 +251,21 @@ class NapoleonHomeBLESession:
             self._mtu = self._client.mtu_size
 
         LOGGER.debug("Napoleon Home %s: outbox subscribed (MTU=%d)", self._mac, self._mtu)
+
+    async def read_open_characteristics(self, ble_device: BLEDevice) -> None:
+        """Connect and read open GATT characteristics. Does not pair or subscribe.
+
+        Only 0x2A00 (Generic Access Device Name) is readable without a bond.
+        DSN and display name require encryption and are not read here.
+        """
+        self._client = await establish_connection(
+            BleakClientWithServiceCache,
+            ble_device,
+            self._mac,
+            max_attempts=1,
+        )
+        LOGGER.debug("Napoleon Home %s: BLE connected, reading open characteristics", self._mac)
+        self._model = await self._read_gatt_char_string(GATT_DEVICE_NAME_UUID, "model (0x2A00)")
 
     async def disconnect(self) -> None:
         """Disconnect from the grill (suppresses errors)."""
@@ -310,11 +354,8 @@ class NapoleonHomeBLESession:
             return await asyncio.wait_for(result_queue.get(), timeout=AUTH_TIMEOUT)
         except TimeoutError:
             return None
-        except Exception as err:
-            if _is_att_insufficient_auth(err):
-                raise NapoleonHomeAlreadyBondedError(
-                    f"Napoleon Home {self._mac}: grill refuses bond (ATT 0x05)"
-                ) from err
+        except Exception as err:  # noqa: BLE001
+            self._raise_if_bonded(err)
             return None
         finally:
             self.unregister_handler("oac", _oac_handler)
@@ -403,30 +444,43 @@ class NapoleonHomeBLESession:
         except NapoleonHomeNotProvisionedError, NapoleonHomeAlreadyBondedError, ConfigEntryAuthFailed, TimeoutError:
             raise
         except Exception as err:
-            if _is_att_insufficient_auth(err):
-                raise NapoleonHomeAlreadyBondedError(
-                    f"Napoleon Home {self._mac}: grill refuses bond (ATT 0x05)"
-                ) from err
+            self._raise_if_bonded(err)
             raise TimeoutError(f"Napoleon Home {self._mac}: BLE auth error — {err}") from err
         finally:
             self.unregister_handler("oac", _oac_handler)
 
-    async def read_dsn(self) -> str | None:
-        """Read DSN from GATT DUID characteristic (no bond required)."""
+    def _raise_if_bonded(self, err: Exception) -> None:
+        """Raise NapoleonHomeAlreadyBondedError if err is an ATT Insufficient Authentication error."""
+        if _is_att_insufficient_auth(err):
+            raise NapoleonHomeAlreadyBondedError(f"Napoleon Home {self._mac}: grill refuses bond (ATT 0x05)") from err
+
+    async def _read_gatt_char_string(self, uuid: str, label: str) -> str | None:
+        """Read a UTF-8 GATT characteristic, strip nulls/whitespace, and return the value or None."""
         if self._client is None:
             return None
         try:
-            data = await self._client.read_gatt_char(DSN_UUID)
-        except Exception as err:
-            LOGGER.debug(
-                "Napoleon Home %s: DSN read of %s failed (%s): %s",
-                self._mac,
-                DSN_UUID,
-                type(err).__name__,
-                err,
-            )
-            raise
-        return data.decode("utf-8").strip("\x00").strip() or None
+            data = await asyncio.wait_for(self._client.read_gatt_char(uuid), timeout=5.0)
+        except Exception as err:  # noqa: BLE001
+            LOGGER.debug("Napoleon Home %s: %s read failed: %s", self._mac, label, err)
+            return None
+        try:
+            result = data.decode("utf-8").strip("\x00").strip() or None
+        except UnicodeDecodeError:
+            return None
+        LOGGER.debug("Napoleon Home %s: %s=%s", self._mac, label, result or "(empty)")
+        return result
+
+    async def read_dsn(self) -> str | None:
+        """Read DSN from GATT DUID characteristic (no bond required)."""
+        return await self._read_gatt_char_string(DSN_UUID, "DSN")
+
+    async def read_display_name(self) -> str | None:
+        """Read human-readable device name from GATT characteristic (no bond required).
+
+        This characteristic is lazy — the device may return an empty value on the
+        first read. Returns None on failure or if the value is empty.
+        """
+        return await self._read_gatt_char_string(DISPLAY_NAME_UUID, "display name")
 
     # ── Context manager ──────────────────────────────────────────────────────
 
