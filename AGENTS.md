@@ -385,19 +385,19 @@ See `.github/instructions/blueprint.config_flow.instructions.md` for comprehensi
 
 **GATT readable characteristics (service `0000fe28`):**
 
-Open (readable without bond):
+Requires bond (ATT 0x0F without an active encrypted session):
 
-| Short UUID      | APK name                     | Example value                                              |
+| Short UUID      | Name                         | Example value                                              |
 | --------------- | ---------------------------- | ---------------------------------------------------------- |
-| `00000001-fe28` | `GATT_CHAR_DUID`             | `"AC000WXXXXXXXXX"` (DSN / serial number)                  |
+| `00000001-fe28` | `GATT_CHAR_DUID`             | `"AC000W011111111"` (DSN / serial number)                  |
 | `00000002-fe28` | `GATT_CHAR_OEM_ID`           | `"146516a1"` (Napoleon's Ayla OEM ID — not used in crypto) |
 | `00000003-fe28` | `GATT_CHAR_OEM_MODEL`        | `"thermometer-mqtt-eu"` (EU); `"thermometer-mqtt-us"` (US) |
 | `00000004-fe28` | `GATT_CHAR_TEMPLATE_VERSION` | `"v3.0.19"` (firmware)                                     |
-| `00000006-fe28` | `GATT_CHAR_DISPLAY_NAME`     | `"Prestige-1F2"`                                           |
+| `00000006-fe28` | `GATT_CHAR_DISPLAY_NAME`     | user-configurable alias                                    |
 
-Note: `GATT_CHAR_DISPLAY_NAME` is lazy and may return empty on the first read. Whether it requires a bond has not been verified on hardware — the dev-container brief indicates no bond is needed, but this should be confirmed empirically.
+Note: On provisioned hardware, both `GATT_CHAR_DUID` (DSN) and `GATT_CHAR_DISPLAY_NAME` require an encrypted (bonded) link — reads before `pair()` fail with ATT error 0x0F (Insufficient Encryption).
 
-**Prestige property name reference (confirmed from APK — `NapProperty.PRESTIGE`):**
+**Prestige property name reference:**
 
 Temperature / sensors:
 

@@ -20,25 +20,40 @@ A Home Assistant integration for **Napoleon Prestige grills**, providing direct 
 
 ## Entities
 
-Each configured grill exposes the following entities:
+Each configured grill exposes the following entities.
 
-| Platform        | Entity                   | Description                              |
-| --------------- | ------------------------ | ---------------------------------------- |
-| `binary_sensor` | Status                   | Whether the grill is reachable over BLE  |
-| `binary_sensor` | Battery saver mode       | Display battery saver mode (diagnostic)  |
-| `sensor`        | Probe 1–3 + Grill        | Live temperature readings                |
-| `sensor`        | Battery                  | Controller battery level                 |
-| `sensor`        | Gas tank weight          | Remaining gas (kg or lbs)                |
-| `sensor`        | Firmware                 | Grill firmware (diagnostic)              |
-| `number`        | Automatic shutoff        | Grill automatic shutoff timeout (1–24 h) |
-| `number`        | Probe 1–3 + Grill target | Alert threshold per channel              |
-| `number`        | Empty tank weight        | Gas calibration: empty tank weight       |
-| `number`        | Full tank weight         | Gas calibration: full tank weight        |
-| `light`         | Knob lights              | Illuminated knob rings on/off            |
-| `select`        | Temperature unit         | Celsius or Fahrenheit                    |
-| `select`        | Tank unit                | Kilograms or Pounds                      |
-| `select`        | Display brightness       | Low, Medium, or High                     |
-| `button`        | Power off                | Remotely power off the grill             |
+**Standard** entities appear on the main device page:
+
+| Platform | Entity                   | Description                   |
+| -------- | ------------------------ | ----------------------------- |
+| `sensor` | Probe 1–3 + Grill        | Live temperature readings     |
+| `sensor` | Tank weight              | Remaining gas (kg or lbs)     |
+| `number` | Probe 1–3 + Grill target | Alert threshold per channel   |
+| `light`  | Knob lights              | Illuminated knob rings on/off |
+| `button` | Power off                | Remotely power off the grill  |
+
+**Configuration** entities appear in the device's configuration section:
+
+| Platform | Entity             | Description                              |
+| -------- | ------------------ | ---------------------------------------- |
+| `number` | Automatic shutoff  | Grill automatic shutoff timeout (1–24 h) |
+| `number` | Empty tank weight  | Gas calibration: empty tank weight       |
+| `number` | Full tank weight   | Gas calibration: full tank weight        |
+| `select` | Temperature unit   | Celsius or Fahrenheit                    |
+| `select` | Tank unit          | Kilograms or pounds                      |
+| `select` | Display brightness | Low, Medium, or High                     |
+
+**Diagnostic** entities appear in the device's diagnostic section:
+
+| Platform        | Entity             | Description                                     |
+| --------------- | ------------------ | ----------------------------------------------- |
+| `binary_sensor` | Status             | Whether the grill is reachable over BLE         |
+| `binary_sensor` | Battery saver mode | Display battery saver mode                      |
+| `sensor`        | Battery            | Controller battery level                        |
+| `sensor`        | Firmware           | Grill firmware version                          |
+| `sensor`        | Tank name          | Ayla-registered tank type (disabled by default) |
+| `sensor`        | Region             | Grill region setting (disabled by default)      |
+| `sensor`        | Country            | Grill country setting (disabled by default)     |
 
 ## Requirements
 

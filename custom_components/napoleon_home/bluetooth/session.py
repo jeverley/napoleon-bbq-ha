@@ -12,7 +12,7 @@ implementations in listeners.py and validate.py.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 import contextlib
 from typing import Any, Self
 
@@ -129,7 +129,7 @@ class NapoleonHomeBLESession:
 
     @property
     def dsn(self) -> str | None:
-        """DSN read from the open GATT characteristic during connect(), or None."""
+        """DSN read from the GATT DUID characteristic after bonding, or None."""
         return self._dsn
 
     @property
@@ -348,17 +348,15 @@ class NapoleonHomeBLESession:
                 with contextlib.suppress(asyncio.QueueFull):
                     result_queue.put_nowait(True)
 
-        self.register_handler("oac", _oac_handler)
-        try:
-            await self.write_msg("Oac", {"t": 1, "i": AUTH_USER})
-            return await asyncio.wait_for(result_queue.get(), timeout=AUTH_TIMEOUT)
-        except TimeoutError:
-            return None
-        except Exception as err:  # noqa: BLE001
-            self._raise_if_bonded(err)
-            return None
-        finally:
-            self.unregister_handler("oac", _oac_handler)
+        with self._oac_subscription(_oac_handler):
+            try:
+                await self.write_msg("Oac", {"t": 1, "i": AUTH_USER})
+                return await asyncio.wait_for(result_queue.get(), timeout=AUTH_TIMEOUT)
+            except TimeoutError:
+                return None
+            except Exception as err:  # noqa: BLE001
+                self._raise_if_bonded(err)
+                return None
 
     async def authenticate(self, local_key: str) -> None:
         """
@@ -398,56 +396,67 @@ class NapoleonHomeBLESession:
                 with contextlib.suppress(asyncio.QueueFull):
                     auth_queue.put_nowait(token)
 
-        self.register_handler("oac", _oac_handler)
-        try:
-            LOGGER.debug("Napoleon Home %s: sending auth challenge request (Oac t:1)", self._mac)
-            await self.write_msg("Oac", {"t": 1, "i": AUTH_USER})
+        with self._oac_subscription(_oac_handler):
+            try:
+                LOGGER.debug("Napoleon Home %s: sending auth challenge request (Oac t:1)", self._mac)
+                await self.write_msg("Oac", {"t": 1, "i": AUTH_USER})
 
-            first = await asyncio.wait_for(auth_queue.get(), timeout=AUTH_TIMEOUT)
+                first = await asyncio.wait_for(auth_queue.get(), timeout=AUTH_TIMEOUT)
 
-            if first == _AUTH_NOT_PROVISIONED:
-                msg_text = f"Napoleon Home {self._mac}: grill not provisioned (s:6) — provision via Napoleon app first"
-                LOGGER.warning(msg_text)
-                raise NapoleonHomeNotProvisionedError(msg_text)  # noqa: TRY301
+                if first == _AUTH_NOT_PROVISIONED:
+                    msg_text = (
+                        f"Napoleon Home {self._mac}: grill not provisioned (s:6) — provision via Napoleon app first"
+                    )
+                    LOGGER.warning(msg_text)
+                    raise NapoleonHomeNotProvisionedError(msg_text)  # noqa: TRY301
 
-            if first == _AUTH_REJECTED:
-                LOGGER.warning("Napoleon Home %s: BLE auth rejected (s:4) — local key has rotated", self._mac)
-                raise ConfigEntryAuthFailed(  # noqa: TRY301
-                    translation_domain=DOMAIN,
-                    translation_key="ble_auth_rejected",
-                )
-
-            if first == _AUTH_ACCEPTED:
-                LOGGER.debug("Napoleon Home %s: authenticated (direct accept)", self._mac)
-                return
-
-            if first.startswith("challenge:"):
-                challenge = first[len("challenge:") :]
-                response = compute_hmac(local_key, challenge)
-                LOGGER.debug(
-                    "Napoleon Home %s: auth challenge received, sending HMAC response",
-                    self._mac,
-                )
-                await self.write_msg("Oac", {"t": 2, "r": response})
-                second = await asyncio.wait_for(auth_queue.get(), timeout=AUTH_TIMEOUT)
-                if second == _AUTH_REJECTED:
+                if first == _AUTH_REJECTED:
                     LOGGER.warning("Napoleon Home %s: BLE auth rejected (s:4) — local key has rotated", self._mac)
                     raise ConfigEntryAuthFailed(  # noqa: TRY301
                         translation_domain=DOMAIN,
                         translation_key="ble_auth_rejected",
                     )
-                LOGGER.debug("Napoleon Home %s: authenticated", self._mac)
-                return
 
-            LOGGER.debug("Napoleon Home %s: unexpected auth message: %s", self._mac, first)
+                if first == _AUTH_ACCEPTED:
+                    LOGGER.debug("Napoleon Home %s: authenticated (direct accept)", self._mac)
+                    return
 
-        except NapoleonHomeNotProvisionedError, NapoleonHomeAlreadyBondedError, ConfigEntryAuthFailed, TimeoutError:
-            raise
-        except Exception as err:
-            self._raise_if_bonded(err)
-            raise TimeoutError(f"Napoleon Home {self._mac}: BLE auth error — {err}") from err
+                if first.startswith("challenge:"):
+                    challenge = first[len("challenge:") :]
+                    response = compute_hmac(local_key, challenge)
+                    LOGGER.debug(
+                        "Napoleon Home %s: auth challenge received, sending HMAC response",
+                        self._mac,
+                    )
+                    await self.write_msg("Oac", {"t": 2, "r": response})
+                    second = await asyncio.wait_for(auth_queue.get(), timeout=AUTH_TIMEOUT)
+                    if second == _AUTH_REJECTED:
+                        LOGGER.warning("Napoleon Home %s: BLE auth rejected (s:4) — local key has rotated", self._mac)
+                        raise ConfigEntryAuthFailed(  # noqa: TRY301
+                            translation_domain=DOMAIN,
+                            translation_key="ble_auth_rejected",
+                        )
+                    LOGGER.debug("Napoleon Home %s: authenticated", self._mac)
+                    return
+
+                LOGGER.debug("Napoleon Home %s: unexpected auth message: %s", self._mac, first)
+                raise RuntimeError(f"Napoleon Home {self._mac}: unexpected auth message — {first!r}")  # noqa: TRY301
+
+            except NapoleonHomeNotProvisionedError, NapoleonHomeAlreadyBondedError, ConfigEntryAuthFailed, TimeoutError:
+                raise
+            except Exception as err:
+                self._raise_if_bonded(err)
+                LOGGER.debug("Napoleon Home %s: BLE auth error: %s", self._mac, err)
+                raise
+
+    @contextlib.contextmanager
+    def _oac_subscription(self, handler: Callable[[dict[str, Any]], None]) -> Iterator[None]:
+        """Register an oac handler for the duration of the context, then unregister."""
+        self.register_handler("oac", handler)
+        try:
+            yield
         finally:
-            self.unregister_handler("oac", _oac_handler)
+            self.unregister_handler("oac", handler)
 
     def _raise_if_bonded(self, err: Exception) -> None:
         """Raise NapoleonHomeAlreadyBondedError if err is an ATT Insufficient Authentication error."""
@@ -471,14 +480,13 @@ class NapoleonHomeBLESession:
         return result
 
     async def read_dsn(self) -> str | None:
-        """Read DSN from GATT DUID characteristic (no bond required)."""
+        """Read DSN from the GATT DUID characteristic. Requires a bonded/encrypted link."""
         return await self._read_gatt_char_string(DSN_UUID, "DSN")
 
     async def read_display_name(self) -> str | None:
-        """Read human-readable device name from GATT characteristic (no bond required).
+        """Read the user-configurable alias from the GATT display name characteristic.
 
-        This characteristic is lazy — the device may return an empty value on the
-        first read. Returns None on failure or if the value is empty.
+        Requires a bonded/encrypted link. Returns None on failure.
         """
         return await self._read_gatt_char_string(DISPLAY_NAME_UUID, "display name")
 

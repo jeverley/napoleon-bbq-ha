@@ -21,7 +21,7 @@ INBOX_UUID = "01000001-fe28-435b-991a-f1b21bb9bcd0"
 OUTBOX_UUID = "01000002-fe28-435b-991a-f1b21bb9bcd0"
 DSN_UUID = "00000001-fe28-435b-991a-f1b21bb9bcd0"  # Ayla config service — requires encryption (bond first)
 DISPLAY_NAME_UUID = (
-    "00000006-fe28-435b-991a-f1b21bb9bcd0"  # User-configurable alias (read/write via app) — may be empty
+    "00000006-fe28-435b-991a-f1b21bb9bcd0"  # User-configurable alias (read/write via app) — requires encryption
 )
 GATT_DEVICE_NAME_UUID = (
     "00002a00-0000-1000-8000-00805f9b34fb"  # Generic Access Device Name (0x2A00) — model string, e.g. "Prestige-1F2"
