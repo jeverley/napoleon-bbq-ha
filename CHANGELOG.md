@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/jeverley/napoleon-home-ha/compare/v1.2.0...v1.2.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* **napoleon_home:** reduce config flow complexity and fix silent auth failure ([0ddb8aa](https://github.com/jeverley/napoleon-home-ha/commit/0ddb8aa56d6bfea09384737b7f526f3bae75c8ab))
+
 ## [1.2.0](https://github.com/jeverley/napoleon-home-ha/compare/v1.1.0...v1.2.0) (2026-07-01)
 
 
