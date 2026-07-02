@@ -8,22 +8,27 @@ The integration uses a hub model: one config entry per Napoleon account, with
 per-device data stored in ``entry.data[CONF_DEVICES]`` keyed by MAC address.
 
 Setup flow (BLE discovery — only supported path):
-    1. ``async_step_bluetooth``: Grill advertisement fires. MAC checked against
-       existing devices; aborts if already configured. Probes provisioning
-       state via BLE (DSN read from open GATT characteristic in the same session):
+    1. ``async_step_bluetooth``: Grill advertisement fires. MAC validated against
+       existing entries and Napoleon device name prefixes; aborts if already
+       configured or not a Napoleon device. If the grill has no advertisement
+       local name, does a lightweight BLE connect to read the 0x2A00 model string
+       (no pairing). Shows a confirmation form (``bluetooth_confirm``).
+    2. ``async_step_bluetooth_confirm``: User taps Submit. Full BLE probe runs:
+       connect → pair → check_provisioned. Routes based on result:
          - s:6 (not provisioned) → ``async_step_provision_guide``
-         - ATT 0x05 (bonded to another device) → ``async_step_factory_reset_guide``
+         - ATT 0x05 / pairing rejected (bonded to another device)
+           → ``async_step_factory_reset_guide``
          - challenge or inconclusive → ``async_step_key_retrieval``
-    2. ``async_step_provision_guide``: User provisions the grill in the Napoleon
+    3. ``async_step_provision_guide``: User provisions the grill in the Napoleon
        app. On confirm, re-probes; routes to ``async_step_key_retrieval`` when
        provisioned, or shows an error if still s:6.
-    3. ``async_step_factory_reset_guide``: User factory-resets the grill. On
+    4. ``async_step_factory_reset_guide``: User factory-resets the grill. On
        confirm, re-probes; routes to ``async_step_provision_guide`` when s:6,
        or shows an error if ATT 0x05 persists.
-    4. ``async_step_key_retrieval``: User enters Napoleon account credentials.
-       Device matched by DSN (from GATT read) when known; otherwise every account
-       device's key is tried against the grill via real BLE auth until one is
-       accepted. Hub entry and device data created on success.
+    5. ``async_step_key_retrieval``: User enters Napoleon account credentials.
+       Device matched by DSN (from GATT read after bonding) when known; otherwise
+       every account device's key is tried against the grill via real BLE auth
+       until one is accepted. Hub entry and device data created on success.
 
 Manual setup (``async_step_user``) is not supported — aborts with
 ``discovery_required``. The grill must be discovered via BLE advertisement.
@@ -41,6 +46,7 @@ https://developers.home-assistant.io/docs/config_entries_config_flow_handler
 from __future__ import annotations
 
 import contextlib
+import enum
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
@@ -124,6 +130,15 @@ class NapoleonHomeMacAddressRequiredError(HomeAssistantError):
 
 class NapoleonHomeBLEConnectionError(HomeAssistantError):
     """Raised when BLE authentication fails due to a connection error (e.g. timeout)."""
+
+
+class ProbeOutcome(enum.Enum):
+    """Result of a BLE provisioning probe."""
+
+    PROVISIONED = "provisioned"
+    NOT_PROVISIONED = "not_provisioned"  # s:6
+    BONDED_TO_OTHER = "bonded_to_other"  # ATT 0x05
+    UNREACHABLE = "unreachable"  # device not found or probe inconclusive
 
 
 def _mac_variant_candidates(mac: str) -> list[str]:
@@ -333,18 +348,12 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            try:
-                provisioned = await self._async_probe_ble(self._mac or "")
-            except NapoleonHomeAlreadyBondedError:
-                errors["base"] = "reset_not_detected"
-            else:
-                if provisioned is True:
-                    return await self.async_step_key_retrieval()
-                if provisioned is False:
-                    # Reset confirmed: grill is unprovisioned — proceed to provision guide.
-                    return await self.async_step_provision_guide()
-                # None — inconclusive; grill did not respond.
-                errors["base"] = "cannot_connect"
+            outcome = await self._async_probe_ble(self._mac or "")
+            if outcome == ProbeOutcome.PROVISIONED:
+                return await self.async_step_key_retrieval()
+            if outcome == ProbeOutcome.NOT_PROVISIONED:
+                return await self.async_step_provision_guide()
+            errors["base"] = "reset_not_detected" if outcome == ProbeOutcome.BONDED_TO_OTHER else "cannot_connect"
 
         return self.async_show_form(
             step_id="factory_reset_guide",
@@ -380,17 +389,12 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            try:
-                provisioned = await self._async_probe_ble(self._mac or "")
-            except NapoleonHomeAlreadyBondedError:
+            outcome = await self._async_probe_ble(self._mac or "")
+            if outcome == ProbeOutcome.PROVISIONED:
+                return await self.async_step_key_retrieval()
+            if outcome == ProbeOutcome.BONDED_TO_OTHER:
                 return await self.async_step_factory_reset_guide()
-            else:
-                if provisioned is True:
-                    return await self.async_step_key_retrieval()
-                if provisioned is False:
-                    errors["base"] = "ble_not_provisioned"
-                else:
-                    errors["base"] = "cannot_connect"
+            errors["base"] = "ble_not_provisioned" if outcome == ProbeOutcome.NOT_PROVISIONED else "cannot_connect"
 
         return self.async_show_form(
             step_id="provision_guide",
@@ -417,33 +421,28 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def _async_probe_and_route(self) -> config_entries.ConfigFlowResult:
         """Probe the grill's provisioning state and route to the appropriate next step.
 
-        Used by ``async_step_bluetooth`` after the initial advertisement check.
+        Used by ``async_step_bluetooth_confirm`` after the user taps Submit.
         Calls ``_async_probe_ble``, applies the display name from GATT if retrieved,
-        then routes: factory_reset_guide on ATT 0x05, provision_guide on s:6,
-        key_retrieval on provisioned or inconclusive.
+        then routes based on the outcome.
 
         """
-        try:
-            provisioned = await self._async_probe_ble(self._mac or "")
-        except NapoleonHomeAlreadyBondedError:
+        outcome = await self._async_probe_ble(self._mac or "")
+        if self._ble_display_name:
+            self._name = self._ble_display_name
+            self.context["title_placeholders"] = {"name": self._name}
+        if outcome == ProbeOutcome.BONDED_TO_OTHER:
             LOGGER.info(
                 "Napoleon Home: setup_stage=bluetooth_step_branch branch=factory_reset address=%s",
                 self._mac,
             )
-            if self._ble_display_name:
-                self._name = self._ble_display_name
-                self.context["title_placeholders"] = {"name": self._name}
             return await self.async_step_factory_reset_guide()
-        if self._ble_display_name:
-            self._name = self._ble_display_name
-            self.context["title_placeholders"] = {"name": self._name}
-        if provisioned is False:
+        if outcome == ProbeOutcome.NOT_PROVISIONED:
             LOGGER.info(
                 "Napoleon Home: setup_stage=bluetooth_step_branch branch=provision_guide address=%s",
                 self._mac,
             )
             return await self.async_step_provision_guide()
-        if provisioned is None:
+        if outcome == ProbeOutcome.UNREACHABLE:
             LOGGER.warning(
                 "Napoleon Home: setup_stage=bluetooth_step_branch branch=key_retrieval "
                 "reason=probe_inconclusive address=%s",
@@ -456,34 +455,26 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
         return await self.async_step_key_retrieval()
 
-    async def _async_probe_ble(self, mac: str) -> bool | None:
+    async def _async_probe_ble(self, mac: str) -> ProbeOutcome:
         """Connect, bond, and probe provisioning state.
 
-        Returns True (challenge received), False (s:6 — not provisioned), or None
-        (grill not discoverable or probe inconclusive).
-
-        On first call (``self._ble_dsn is None``) also reads the DSN from the open
-        GATT DUID characteristic during the same connection. When no advertisement
-        local name was present (provisioned grill), also reads the display name from
-        the GATT characteristic until a non-empty value is returned.
-
-        Raises:
-            NapoleonHomeAlreadyBondedError: Grill refuses writes with ATT 0x05.
+        Returns a ProbeOutcome. Reads DSN and display name or model string from
+        GATT during the session (best-effort; failures are suppressed).
 
         """
         ble_device = async_ble_device_from_address(self.hass, mac, connectable=True)
         if ble_device is None:
-            return None
+            return ProbeOutcome.UNREACHABLE
         try:
             async with NapoleonHomeBLESession(mac) as session:
                 # Catch AlreadyBondedError so we can still harvest session.model (0x2A00),
                 # which connect() reads before pair(). DSN and display_name are read after
                 # pair() and are unavailable in the bonded case.
-                bonded_err: NapoleonHomeAlreadyBondedError | None = None
+                bonded = False
                 try:
                     await session.connect(ble_device)
-                except NapoleonHomeAlreadyBondedError as err:
-                    bonded_err = err
+                except NapoleonHomeAlreadyBondedError:
+                    bonded = True
 
                 if self._ble_dsn is None:
                     self._ble_dsn = session.dsn
@@ -494,21 +485,21 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 elif not self._ble_display_name and session.model:
                     self._ble_display_name = session.model
 
-                if bonded_err is not None:
-                    raise bonded_err  # noqa: TRY301
+                if bonded:
+                    return ProbeOutcome.BONDED_TO_OTHER
 
                 provisioned = await session.check_provisioned()
-                LOGGER.debug(
-                    "Napoleon Home %s: check_provisioned=%s",
-                    mac,
-                    provisioned,
-                )
-                return provisioned
+                LOGGER.debug("Napoleon Home %s: check_provisioned=%s", mac, provisioned)
+                if provisioned is True:
+                    return ProbeOutcome.PROVISIONED
+                if provisioned is False:
+                    return ProbeOutcome.NOT_PROVISIONED
+                return ProbeOutcome.UNREACHABLE
         except NapoleonHomeAlreadyBondedError:
-            raise
+            return ProbeOutcome.BONDED_TO_OTHER
         except Exception:  # noqa: BLE001
             LOGGER.debug("Napoleon Home %s: BLE probe failed — treating as inconclusive", mac)
-            return None
+            return ProbeOutcome.UNREACHABLE
 
     async def async_step_user(
         self,
@@ -549,11 +540,13 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self._password = password
             self._region_key = region_key
 
+            devices: list[tuple[str, str, str]] = []
             async with self._handle_api_errors(errors):
                 region = AYLA_REGIONS[region_key]
-                session = async_get_clientsession(self.hass)
-                client = NapoleonHomeApiClient(region, session)
+                http_session = async_get_clientsession(self.hass)
+                client = NapoleonHomeApiClient(region, http_session)
                 devices, access_token, refresh_token, token_expiry = await client.async_list_devices(username, password)
+
             if "base" not in errors:
                 # Match device: prefer DSN from GATT read. If unknown or stale,
                 # try every account device and let real BLE auth decide — more
@@ -578,45 +571,12 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     self._access_token = access_token
                     self._refresh_token = refresh_token
                     self._token_expiry = token_expiry
-
-                    result: config_entries.ConfigFlowResult | None = None
-                    key_rejected = False
-                    for dsn, device_name, _ in candidates:
-                        LOGGER.debug(
-                            "Napoleon Home: key_retrieval attempting dsn=%s name=%s",
-                            dsn,
-                            device_name,
-                        )
-                        try:
-                            local_key, local_key_id = await client.async_fetch_key(access_token, dsn)
-                            result = await self._async_finish(dsn, device_name, local_key, local_key_id)
-                        except NapoleonHomeNotProvisionedError:
-                            return await self.async_step_provision_guide()
-                        except ConfigEntryAuthFailed:
-                            LOGGER.debug("Napoleon Home: DSN %s key rejected — trying next candidate", dsn)
-                            key_rejected = True
-                            continue
-                        except NapoleonHomeMacAddressRequiredError:
-                            errors["base"] = "ble_discovery_required"
-                            break
-                        except NapoleonHomeBLEConnectionError:
-                            errors["base"] = "ble_auth_failed"
-                            break
-                        except HomeAssistantError:
-                            errors["base"] = "cannot_connect"
-                            break
-                        except NapoleonHomeApiClientError:
-                            errors["base"] = "cannot_connect"
-                            break
-                        except Exception:  # noqa: BLE001
-                            LOGGER.exception("Unexpected exception finalising Napoleon Home setup")
-                            errors["base"] = "unknown"
-                            break
-                        else:
-                            return result
-
-                    if result is None and "base" not in errors:
-                        errors["base"] = "ble_key_rejected" if key_rejected else "no_devices_found"
+                    try:
+                        result, errors = await self._async_try_candidates(candidates, client, access_token)
+                    except NapoleonHomeNotProvisionedError:
+                        return await self.async_step_provision_guide()
+                    if result is not None:
+                        return result
 
         return self.async_show_form(
             step_id="key_retrieval",
@@ -630,6 +590,47 @@ class NapoleonHomeConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={"name": self._name or self._mac or ""},
         )
+
+    async def _async_try_candidates(
+        self,
+        candidates: list[tuple[str, str, str]],
+        client: NapoleonHomeApiClient,
+        access_token: str,
+    ) -> tuple[config_entries.ConfigFlowResult | None, dict[str, str]]:
+        """Try each device candidate in order, returning on the first success.
+
+        Returns ``(result, {})`` when a candidate authenticates, or
+        ``(None, errors)`` when all candidates fail. Raises
+        ``NapoleonHomeNotProvisionedError`` for caller routing to provision_guide.
+
+        """
+        errors: dict[str, str] = {}
+        key_rejected = False
+        for dsn, device_name, _ in candidates:
+            LOGGER.debug("Napoleon Home: key_retrieval attempting dsn=%s name=%s", dsn, device_name)
+            try:
+                local_key, local_key_id = await client.async_fetch_key(access_token, dsn)
+                return await self._async_finish(dsn, device_name, local_key, local_key_id), {}
+            except NapoleonHomeNotProvisionedError:
+                raise
+            except ConfigEntryAuthFailed:
+                LOGGER.debug("Napoleon Home: DSN %s key rejected — trying next candidate", dsn)
+                key_rejected = True
+            except NapoleonHomeMacAddressRequiredError:
+                errors["base"] = "ble_discovery_required"
+                break
+            except NapoleonHomeBLEConnectionError:
+                errors["base"] = "ble_auth_failed"
+                break
+            except HomeAssistantError, NapoleonHomeApiClientError:
+                errors["base"] = "cannot_connect"
+                break
+            except Exception:  # noqa: BLE001
+                LOGGER.exception("Unexpected exception finalising Napoleon Home setup")
+                errors["base"] = "unknown"
+                break
+        errors["base"] = "ble_key_rejected" if key_rejected else "no_devices_found"
+        return None, errors
 
     async def _async_finish(
         self,
